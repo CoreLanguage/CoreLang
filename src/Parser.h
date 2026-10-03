@@ -63,7 +63,7 @@ private:
   DClass *parseClass(bool isPub, bool packed);
   DInterface *parseInterface(bool isPub, bool isTrait);
   DEnum *parseEnum(bool isPub);
-  Decl *parseGlobalOrConst(bool isPub);
+  Decl *parseGlobalOrConst(bool isPub, bool forceMut = false, bool forceTLS = false);
   DExtern *parseExtern(bool isPub, std::string linkName);
   DImport *parseImport(bool isPub);
 

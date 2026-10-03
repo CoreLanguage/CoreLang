@@ -337,6 +337,11 @@ llvm::Constant *Codegen::evalConst(Expr *e) {
     unsigned bits = t->isInt() ? primBits(t->prim) : 32;
     if (t->prim == PRIM_i128 || t->prim == PRIM_u128)
       return ConstantInt::get(ctx, APInt(bits, ie->digits, 10));
+    if (ie->neg) {
+      // negative literal: stored as magnitude + sign; emit the two's complement
+      llvm::APInt mag(bits, ie->value);
+      return ConstantInt::get(ctx, -mag);
+    }
     bool isSigned = primIsSigned(t->prim);
     return ConstantInt::get(ctx, APInt(bits, isSigned ? (int64_t)ie->value : ie->value));
   }

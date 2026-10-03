@@ -247,14 +247,18 @@ Expr *Parser::parseUnary() {
     Expr *e = parseUnary();
     if (!e) return nullptr;
     if (op == "-") {
-      // fold negative literals for nicer diagnostics/codegen
+      // fold negative literals: keep the magnitude + sign flag so typing/range
+      // checks see the true (negative) extent
       if (e->kind == Expr::IntLit) {
         auto *ie = (EInt *)e;
-        auto *ne = ctx.make<EInt>(l);
-        ne->value = (unsigned long long)(0 - ie->value);
-        ne->digits = "-" + ie->digits;
-        ne->big128 = ie->big128;
-        return ne;
+        if (!ie->neg) {
+          auto *ne = ctx.make<EInt>(l);
+          ne->value = ie->value;
+          ne->neg = true;
+          ne->digits = "-" + ie->digits;
+          ne->big128 = ie->big128;
+          return ne;
+        }
       }
       if (e->kind == Expr::FloatLit) {
         auto *fe = (EFloat *)e;
@@ -780,6 +784,7 @@ Stmt *Parser::parseStatement() {
     s->stmts = ((SBlock *)b)->stmts;
     return s;
   }
+  if (atPunct("{")) return parseBlock(); // bare nested block
   if (atKw("mut")) return parseLetOrExpr(true);
   if (atKw("const")) {
     advance();
@@ -1191,14 +1196,14 @@ DEnum *Parser::parseEnum(bool isPub) {
   return e;
 }
 
-Decl *Parser::parseGlobalOrConst(bool isPub) {
+Decl *Parser::parseGlobalOrConst(bool isPub, bool forceMut, bool forceTLS) {
   SourceLoc l = loc();
   bool isConst = atKw("const");
-  bool isMut = false, isTLS = false;
+  bool isMut = forceMut, isTLS = forceTLS;
   if (isConst) advance();
   else {
     if (eatKw("tls")) isTLS = true;
-    isMut = eatKw("mut");
+    isMut = isMut || eatKw("mut");
     if (!isTLS && eatKw("tls")) isTLS = true;
   }
   Token n = expectIdent(isConst ? "constant name" : "variable name");
@@ -1352,8 +1357,9 @@ Decl *Parser::parseTopDecl(std::vector<Attr> &attrs) {
   if (atKw("trait")) { advance(); return parseInterface(isPub, true); }
   if (atKw("enum")) { advance(); return parseEnum(isPub); }
   if (atKw("extern")) { advance(); return parseExtern(isPub, linkName); }
-  if (atKw("const")) return parseGlobalOrConst(isPub);
-  if (atKw("mut") || atKw("tls") || atIdent()) return parseGlobalOrConst(isPub);
+  if (atKw("const")) return parseGlobalOrConst(isPub, mods & MOD_MUT, mods & MOD_TLS);
+  if (atKw("mut") || atKw("tls") || atIdent())
+    return parseGlobalOrConst(isPub, mods & MOD_MUT, mods & MOD_TLS);
   errorAt(loc(), strfmt("expected a declaration, found %s", tokName(tk().kind)),
           "declarations: func, struct, class, interface, trait, enum, import, extern, global variables, const",
           tk().len);

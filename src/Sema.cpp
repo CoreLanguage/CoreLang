@@ -544,8 +544,9 @@ Expr *Sema::constFold(Expr *e) {
     if (inner && inner->kind == Expr::IntLit && u->op == "-") {
       auto *ie = (EInt *)inner;
       auto *n = new EInt(u->loc);
-      n->value = (unsigned long long)(0 - ie->value);
-      n->digits = "-" + ie->digits;
+      n->value = ie->value;
+      n->neg = !ie->neg;
+      n->digits = ie->neg ? ie->digits.substr(1) : "-" + ie->digits;
       return n;
     }
     return nullptr;
@@ -612,14 +613,21 @@ bool Sema::typesAssignable(Type *dst, Type *src, Expr *srcExpr, SourceLoc loc,
   }
   // literal fitting
   Expr *lit = srcExpr ? stripNeg(srcExpr) : nullptr;
+  bool litNeg = lit && srcExpr && srcExpr != lit;
+  if (lit && srcExpr && srcExpr->kind == Expr::IntLit) litNeg = ((EInt *)srcExpr)->neg;
   if (lit && lit->kind == Expr::IntLit && dst->isInt()) {
     unsigned bits = primBits(dst->prim);
     unsigned long long v = ((EInt *)lit)->value;
     bool fits = true;
-    if (dst->prim == PRIM_i128) {
-      fits = true; // 128-bit range: literal came from at most 128 bits
-    } else if (dst->prim == PRIM_u128) {
+    if (dst->prim == PRIM_i128 || dst->prim == PRIM_u128) {
       fits = true;
+    } else if (litNeg) {
+      // negative: fits if magnitude <= 2^(bits-1)
+      fits = bits >= 64 || (v >> bits) == 0;
+      if (bits < 64 && primIsSigned(dst->prim)) fits = v <= (1ULL << (bits - 1));
+      else if (bits < 64) fits = false;
+      if (bits >= 64 && primIsSigned(dst->prim)) fits = v <= (1ULL << 63);
+      if (bits >= 64 && !primIsSigned(dst->prim)) fits = false;
     } else if (primIsSigned(dst->prim) && bits < 64) {
       long long sv = (long long)v;
       fits = sv >= -(1LL << (bits - 1)) && sv <= (1LL << (bits - 1)) - 1;
@@ -1246,7 +1254,14 @@ void Sema::checkExpr(Expr *e, bool lvalue) {
   case Expr::IntLit: {
     auto *ie = (EInt *)e;
     if (e->type) return; // already coerced by literal fitting
-    if (ie->big128) { e->type = tc.prim(PRIM_u128); return; }
+    if (ie->big128) { e->type = tc.prim(ie->neg ? PRIM_i128 : PRIM_u128); return; }
+    if (ie->neg) {
+      // negative literals fit i32 up to -2^31, i64 up to -2^63
+      if (ie->value <= 0x80000000ULL) e->type = tc.prim(PRIM_i32);
+      else if (ie->value <= 0x8000000000000000ULL) e->type = tc.prim(PRIM_i64);
+      else e->type = tc.prim(PRIM_i128);
+      return;
+    }
     if (ie->value <= 0x7FFFFFFFLL) e->type = tc.prim(PRIM_i32);
     else if (ie->value <= 0x7FFFFFFFFFFFFFFFLL) e->type = tc.prim(PRIM_i64);
     else e->type = tc.prim(PRIM_u64);
@@ -3159,14 +3174,24 @@ DFunc *Sema::resolveOverload(const std::vector<DFunc *> &cands, const std::vecto
         if (fits) { score = std::min(score, 1); continue; }
       }
       Expr *lit = stripNeg(args[ai]);
+      bool litNeg = args[ai]->kind == Expr::IntLit ? ((EInt *)args[ai])->neg : false;
       if (lit && lit->kind == Expr::IntLit && want && want->isInt()) {
         unsigned bits = primBits(want->prim);
         unsigned long long v = ((EInt *)lit)->value;
-        bool fits = want->prim == PRIM_i128 || want->prim == PRIM_u128 || bits >= 64 ||
-                    (v >> bits) == 0;
-        if (primIsSigned(want->prim) && bits < 64) {
-          long long sv = (long long)v;
-          fits = sv >= -(1LL << (bits - 1)) && sv <= (1LL << (bits - 1)) - 1;
+        bool fits;
+        if (litNeg) {
+          fits = want->prim == PRIM_i128 || (bits >= 64 && primIsSigned(want->prim))
+                     ? true
+                     : (bits < 64 && primIsSigned(want->prim))
+                           ? v <= (1ULL << (bits - 1))
+                           : false;
+        } else {
+          fits = want->prim == PRIM_i128 || want->prim == PRIM_u128 || bits >= 64 ||
+                 (v >> bits) == 0;
+          if (primIsSigned(want->prim) && bits < 64) {
+            long long sv = (long long)v;
+            fits = sv >= -(1LL << (bits - 1)) && sv <= (1LL << (bits - 1)) - 1;
+          }
         }
         if (fits) { score = std::min(score, 1); continue; }
       }

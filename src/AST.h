@@ -95,8 +95,9 @@ struct Expr {
 };
 
 struct EInt : Expr {
-  unsigned long long value = 0;
-  std::string digits;  // full digit string (for big literals)
+  unsigned long long value = 0; // magnitude when neg is set
+  bool neg = false;             // unary minus applied to the literal
+  std::string digits;           // full digit string (for big literals)
   bool big128 = false;
   EInt(SourceLoc l) : Expr(IntLit, l) {}
 };
