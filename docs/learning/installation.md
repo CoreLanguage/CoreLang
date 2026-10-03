@@ -50,10 +50,14 @@ The driver finds them **next to the binary**: if you have `build/core`, it looks
 
 ## Installing system-wide (/usr/local/bin)
 
-The easiest way to put `core` on your PATH is the CMake install step:
+The easiest way is the installer script at the repository root - it checks
+prerequisites, builds, runs the test suite, installs, and verifies:
 
 ```bash
-sudo cmake --install build --prefix /usr/local
+./install.sh                     # build + install to /usr/local
+./install.sh --prefix ~/.local   # user-local install instead
+./install.sh --skip-tests        # skip the test suite
+./install.sh --uninstall         # remove the toolchain
 ```
 
 This lays the toolchain out exactly where the driver looks for it:
@@ -69,7 +73,7 @@ No `CORE_HOME` needed — the driver finds `../lib/core` relative to
 
 ```bash
 core version                     # Core compiler 0.1.0 (LLVM 18.x backend)
-sudo rm -r /usr/local/bin/core /usr/local/lib/core   # to uninstall
+./install.sh --uninstall         # removes bin/core + lib/core
 ```
 
 ## The `CORE_HOME` environment variable

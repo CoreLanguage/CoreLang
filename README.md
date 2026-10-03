@@ -58,12 +58,18 @@ Requirements: CMake ≥ 3.20, C++17 compiler, LLVM 18 development libraries
 (`llvm-18-dev` / `llvm-dev`), a C compiler for linking produced binaries.
 
 ```console
+$ ./install.sh                   # builds, tests, installs to /usr/local
+```
+
+or manually:
+
+```console
 $ cmake -S . -B build
 $ cmake --build build
 ```
 
 The compiler binary lands at `build/core` (with `corert.o` + `std/` beside it).
-Install with `cmake --install build` if desired.
+Install with `./install.sh` (or `cmake --install build`) if desired.
 
 ```console
 $ ./build/core version
