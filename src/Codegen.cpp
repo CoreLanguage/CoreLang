@@ -957,10 +957,20 @@ llvm::Value *Codegen::emitExpr(Expr *e) {
       }
       return builder.CreateLoad(llvmType(t), addr, "field");
     }
-    if (m->memberKind == MemberKind::ModuleMember && m->target &&
-        ((Decl *)m->target)->kind == Decl::Global) {
-      auto *gv = globalFor((DGlobal *)m->target);
-      return builder.CreateLoad(gv->getValueType(), gv);
+    if (m->memberKind == MemberKind::ModuleMember && m->target) {
+      Decl *td = (Decl *)m->target;
+      if (td->kind == Decl::Global) {
+        auto *gv = globalFor((DGlobal *)td);
+        return builder.CreateLoad(gv->getValueType(), gv);
+      }
+      if (td->kind == Decl::Const) {
+        auto *c = (DConst *)td;
+        if (c->folded) return (llvm::Constant *)c->folded;
+        if (llvm::Constant *cv = evalConst(c->init)) {
+          c->folded = cv;
+          return cv;
+        }
+      }
     }
     return Constant::getNullValue(llvmType(e->type));
   }
