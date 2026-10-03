@@ -48,6 +48,30 @@ When you compile a program, the `core` driver needs two things from its installa
 
 The driver finds them **next to the binary**: if you have `build/core`, it looks for `build/corert.o` and `build/std/`. That's already true after a source build, so the build directory works as a self-contained toolchain — you can copy `core`, `corert.o`, and `std/` together.
 
+## Installing system-wide (/usr/local/bin)
+
+The easiest way to put `core` on your PATH is the CMake install step:
+
+```bash
+sudo cmake --install build --prefix /usr/local
+```
+
+This lays the toolchain out exactly where the driver looks for it:
+
+```
+/usr/local/bin/core              <- the compiler, now on your PATH
+/usr/local/lib/core/corert.o     <- runtime support library
+/usr/local/lib/core/std/*.cr     <- standard library sources
+```
+
+No `CORE_HOME` needed — the driver finds `../lib/core` relative to
+`/usr/local/bin/core` automatically. Verify and uninstall:
+
+```bash
+core version                     # Core compiler 0.1.0 (LLVM 18.x backend)
+sudo rm -r /usr/local/bin/core /usr/local/lib/core   # to uninstall
+```
+
 ## The `CORE_HOME` environment variable
 
 If you install the toolchain somewhere else (for example `/usr/local/lib/core` with `core` on your `PATH`), set:
