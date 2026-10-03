@@ -69,8 +69,14 @@ llvm::Type *Codegen::llvmType(Type *t) {
     // fat pointer {ptr, itable}
     return StructType::get(PointerType::get(ctx, 0), PointerType::get(ctx, 0));
   }
-  case TypeKind::Enum:
+  case TypeKind::Enum: {
+    DEnum *en = (DEnum *)t->decl;
+    bool hasPayload = false;
+    for (auto &v : en->variants)
+      if (!v.payloadTypes.empty()) hasPayload = true;
+    if (!hasPayload) return builder.getInt32Ty(); // simple enums are i32
     return enumStorageType(t, nullptr, nullptr, nullptr);
+  }
   case TypeKind::Func: {
     // closure pair {fn ptr, env ptr}
     return StructType::get(PointerType::get(ctx, 0), PointerType::get(ctx, 0));
@@ -137,68 +143,55 @@ unsigned Codegen::fieldGEPIndex(Type *aggTy, int memberIndex) {
   return (unsigned)memberIndex;
 }
 
+// Compute the byte extent of one variant's payload area: lays out each payload
+// field with proper alignment and returns (payloadAlign, payloadBytes).
+static std::pair<unsigned, unsigned> variantExtent(Codegen *cg, llvm::Module *mod, DEnum *e,
+                                                   const std::vector<Type *> &genericArgs,
+                                                   const std::vector<TypeExpr *> &payloads,
+                                                   Sema *sema, TypeContext &tc) {
+  unsigned maxAlign = 1, cursor = 0;
+  auto *saved = sema->subst;
+  std::map<std::string, Type *> sub;
+  for (size_t gi = 0; gi < e->genericParams.size() && gi < genericArgs.size(); gi++)
+    sub[e->genericParams[gi]] = genericArgs[gi];
+  sema->subst = sub.empty() ? nullptr : &sub;
+  for (auto *pte : payloads) {
+    Type *rt = sema->resolveType(pte);
+    if (!rt) continue;
+    llvm::Type *lt = cg->llvmTypeFor(rt);
+    unsigned al = mod->getDataLayout().getABITypeAlign(lt).value();
+    unsigned sz = (unsigned)mod->getDataLayout().getTypeAllocSize(lt);
+    maxAlign = std::max(maxAlign, al);
+    cursor = (cursor + al - 1) / al * al;
+    cursor += sz;
+  }
+  sema->subst = saved;
+  return {maxAlign, cursor};
+}
+
 llvm::Type *Codegen::enumStorageType(Type *t, unsigned *payloadOffset, unsigned *totalSize,
                                      unsigned *alignOut) {
   DEnum *e = (DEnum *)t->decl;
   std::string name = "core.enum." + e->name;
   for (auto *a : t->genericArgs) name += "." + sema.mangleTypeForName(a);
-  if (auto *st = StructType::getTypeByName(ctx, name)) {
-    // recompute offsets
-    unsigned maxAlign = 1, maxSize = 0;
-    bool hasPayload = false;
-    for (auto &v : e->variants) {
-      if (v.payloadTypes.empty()) continue;
-      hasPayload = true;
-      auto *saved = sema.subst;
-      std::map<std::string, Type *> sub;
-      for (size_t gi = 0; gi < e->genericParams.size() && gi < t->genericArgs.size(); gi++)
-        sub[e->genericParams[gi]] = t->genericArgs[gi];
-      sema.subst = sub.empty() ? nullptr : &sub;
-      for (auto *pt : v.payloadTypes) {
-        Type *rt = sema.resolveType(pt);
-        if (!rt) continue;
-        unsigned al = mod->getDataLayout().getABITypeAlign(llvmType(rt)).value();
-        unsigned sz = (unsigned)mod->getDataLayout().getTypeAllocSize(llvmType(rt));
-        maxAlign = std::max(maxAlign, al);
-        maxSize = std::max(maxSize, sz);
-      }
-      sema.subst = saved;
-    }
-    unsigned off = 4;
-    if (maxAlign > 4) off = (4 + maxAlign - 1) / maxAlign * maxAlign;
-    if (payloadOffset) *payloadOffset = hasPayload ? off : 0;
-    if (totalSize) *totalSize = hasPayload ? off + maxSize : 4;
-    if (alignOut) *alignOut = std::max(4u, maxAlign);
-    return st;
-  }
-  // create byte-array storage
-  unsigned maxAlign = 1, maxSize = 0;
   bool hasPayload = false;
+  unsigned maxAlign = 1, maxExtent = 0;
   for (auto &v : e->variants) {
     if (v.payloadTypes.empty()) continue;
     hasPayload = true;
-    auto *saved = sema.subst;
-    std::map<std::string, Type *> sub;
-    for (size_t gi = 0; gi < e->genericParams.size() && gi < t->genericArgs.size(); gi++)
-      sub[e->genericParams[gi]] = t->genericArgs[gi];
-    sema.subst = sub.empty() ? nullptr : &sub;
-    for (auto *pt : v.payloadTypes) {
-      Type *rt = sema.resolveType(pt);
-      if (!rt) continue;
-      unsigned al = mod->getDataLayout().getABITypeAlign(llvmType(rt)).value();
-      unsigned sz = (unsigned)mod->getDataLayout().getTypeAllocSize(llvmType(rt));
-      maxAlign = std::max(maxAlign, al);
-      maxSize = std::max(maxSize, sz);
-    }
-    sema.subst = saved;
+    auto [al, ex] = variantExtent(this, mod, e, t->genericArgs, v.payloadTypes, &sema, tc);
+    maxAlign = std::max(maxAlign, al);
+    maxExtent = std::max(maxExtent, ex);
   }
   unsigned off = 4;
   if (maxAlign > 4) off = (4 + maxAlign - 1) / maxAlign * maxAlign;
-  unsigned total = hasPayload ? off + maxSize : 4;
-  llvm::StructType *st = StructType::create(ctx, ArrayType::get(builder.getInt8Ty(), total), name);
+  unsigned total = hasPayload ? off + maxExtent : 4;
   if (payloadOffset) *payloadOffset = hasPayload ? off : 0;
   if (totalSize) *totalSize = total;
   if (alignOut) *alignOut = std::max(4u, maxAlign);
+  llvm::StructType *st = StructType::getTypeByName(ctx, name);
+  if (!st)
+    st = StructType::create(ctx, ArrayType::get(builder.getInt8Ty(), total), name);
   return st;
 }
 
@@ -218,23 +211,23 @@ llvm::Function *Codegen::declareFunc(DFunc *f, const std::vector<Type *> &generi
   std::string sym = funcSymbol(f, genericArgs);
   if (auto *existing = mod->getFunction(sym)) return existing;
 
-  std::vector<Type *> paramTypes;
-  if (f->parent && !f->isStatic && f->name != "init") {
-    // methods take self; init takes self too — handled below via selfTypeOf
+  // generic instances resolve template types under their substitution
+  std::map<std::string, Type *> instanceSubst;
+  auto *savedSubst = sema.subst;
+  if (!f->genericParams.empty() && !genericArgs.empty()) {
+    for (size_t gi = 0; gi < f->genericParams.size() && gi < genericArgs.size(); gi++)
+      instanceSubst[f->genericParams[gi]] = genericArgs[gi];
+    sema.subst = &instanceSubst;
   }
+  std::vector<Type *> paramTypes;
   Type *selfTy = sema.selfTypeOf(f);
   bool hasSelf = selfTy != nullptr && !f->isStatic;
   if (hasSelf) paramTypes.push_back(selfTy);
   for (auto &p : f->params) paramTypes.push_back(sema.resolveType(p.type));
 
   Type *retTy = f->retType ? sema.resolveType(f->retType) : tc.prim(PRIM_void);
+  sema.subst = savedSubst;
   if (retTy && retTy->isNever()) retTy = nullptr; // void in LLVM
-  for (auto &p : f->params)
-    if (p.type && !sema.resolveType(p.type)) {
-      fprintf(stderr, "internal: cannot resolve param type of '%s' in '%s'\n", p.name.c_str(), f->name.c_str());
-      return nullptr;
-    }
-  // (retTy == nullptr here means `never` -> LLVM void, which is fine)
 
   std::vector<llvm::Type *> lparams;
   for (auto *pt : paramTypes) {
@@ -540,6 +533,15 @@ void Codegen::emitFuncBody(DFunc *f, const std::vector<Type *> &genericArgs) {
   if (!fnp->empty()) return; // already emitted
   fn = fnp;                  // member: used by all statement emission
 
+  // generic instances resolve template types under their substitution
+  std::map<std::string, Type *> instanceSubst;
+  auto *savedSemaSubst = sema.subst;
+  if (!f->genericParams.empty() && !genericArgs.empty()) {
+    for (size_t gi = 0; gi < f->genericParams.size() && gi < genericArgs.size(); gi++)
+      instanceSubst[f->genericParams[gi]] = genericArgs[gi];
+    sema.subst = &instanceSubst;
+  }
+
   DFunc *savedDecl = curFuncDecl;
   ModuleSema *savedModule = curModule;
   curFuncDecl = f;
@@ -605,6 +607,7 @@ void Codegen::emitFuncBody(DFunc *f, const std::vector<Type *> &genericArgs) {
 
   // epilogue: default return value if the block can fall through
   Type *retTy = f->retType ? sema.resolveType(f->retType) : tc.prim(PRIM_void);
+  sema.subst = savedSemaSubst;
   bool returnsNothing = !retTy || retTy->isVoid() || retTy->isNever();
   bool isEntryMain = f->name == "main" && f->parent == nullptr && !f->isExtern;
   if (returnsNothing) {
@@ -915,6 +918,15 @@ llvm::Value *Codegen::emitExpr(Expr *e) {
     return emitCall((ECall *)e);
   case Expr::Member: {
     auto *m = (EMember *)e;
+    if (m->memberKind == MemberKind::VariantOf) {
+      // unit variant value: tag constant (payload-less enums are i32)
+      DEnum *en = (DEnum *)m->target;
+      Type *et = e->type && e->type->isEnum() ? e->type : tc.getEnum(en, {});
+      if (et && enumHasPayloads(en)) {
+        return emitVariantValue(en, (unsigned)m->memberIndex, et);
+      }
+      return ConstantInt::get(builder.getInt32Ty(), m->memberIndex);
+    }
     llvm::Value *addr = emitLValue(e);
     if (addr) {
       Type *t = e->type;
@@ -954,6 +966,22 @@ llvm::Value *Codegen::emitExpr(Expr *e) {
   default:
     return Constant::getNullValue(llvmType(e->type ? e->type : tc.prim(PRIM_i32)));
   }
+}
+
+bool Codegen::enumHasPayloads(DEnum *e) {
+  for (auto &v : e->variants)
+    if (!v.payloadTypes.empty()) return true;
+  return false;
+}
+
+// Build an enum value with the given tag (payload zeroed).
+llvm::Value *Codegen::emitVariantValue(DEnum *en, unsigned tag, Type *enumTy) {
+  unsigned off, total, align;
+  llvm::Type *storage = enumStorageType(enumTy, &off, &total, &align);
+  llvm::Value *slot = builder.CreateAlloca(storage, nullptr, "variant");
+  builder.CreateStore(ConstantInt::get(builder.getInt32Ty(), tag),
+                      builder.CreateBitCast(slot, PointerType::get(ctx, 0)));
+  return builder.CreateLoad(storage, slot);
 }
 
 // ------------------------------------------------------------- closures -----
@@ -1776,7 +1804,12 @@ llvm::Value *Codegen::emitArrayLit(EArrayLit *al) {
 // ----------------------------------------------------------------- match ----
 llvm::Value *Codegen::emitMatch(EMatch *m) {
   Type *st = m->scrutinee->type;
+  if (getenv("CORE_DBG")) fprintf(stderr, "[match] scrutinee type kind=%d\n", st ? (int)st->kind : -1);
   llvm::Value *scrut = emitExpr(m->scrutinee);
+  if (!builder.GetInsertBlock()) {
+    fprintf(stderr, "internal: no insert point after scrutinee in match\n");
+    return Constant::getNullValue(builder.getInt32Ty());
+  }
   llvm::Function *f = builder.GetInsertBlock()->getParent();
   llvm::BasicBlock *endBB = llvm::BasicBlock::Create(ctx, "match.end", f);
 
@@ -1796,7 +1829,10 @@ llvm::Value *Codegen::emitMatch(EMatch *m) {
     }
   }
 
-  llvm::Value *resultSlot = builder.CreateAlloca(llvmType(m->type), nullptr, "match.res");
+  bool matchHasValue = m->type && !m->type->isVoid() && !m->type->isNever() &&
+                       m->type->kind != TypeKind::Invalid;
+  llvm::Value *resultSlot =
+      matchHasValue ? builder.CreateAlloca(llvmType(m->type), nullptr, "match.res") : nullptr;
   // build blocks
   std::vector<std::pair<llvm::BasicBlock *, MatchArm *>> armBlocks;
   for (auto &arm : m->arms) {
@@ -1899,7 +1935,8 @@ llvm::Value *Codegen::emitMatch(EMatch *m) {
     builder.CreateBr(endBB);
   }
   builder.SetInsertPoint(endBB);
-  return builder.CreateLoad(llvmType(m->type), resultSlot);
+  if (resultSlot) return builder.CreateLoad(llvmType(m->type), resultSlot);
+  return Constant::getNullValue(builder.getInt32Ty()); // void match; unused
 }
 
 // ============================================================= statements ===
@@ -2140,6 +2177,10 @@ void Codegen::emitStmt(Stmt *s) {
     auto *sw = (SSwitch *)s;
     emitDebugLoc(s->loc);
     llvm::Value *scrut = emitExpr(sw->scrutinee);
+    if (!scrut) {
+      fprintf(stderr, "internal: switch scrutinee emitted null (kind=%d)\n", (int)sw->scrutinee->kind);
+      scrut = Constant::getNullValue(builder.getInt32Ty());
+    }
     llvm::Function *f = builder.GetInsertBlock()->getParent();
     llvm::BasicBlock *endBB = llvm::BasicBlock::Create(ctx, "switch.end", f);
     // case bodies

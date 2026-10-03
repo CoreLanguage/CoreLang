@@ -17,10 +17,12 @@ public:
     TypeExpr *n = ctx.makeNoLoc<TypeExpr>();
     *n = *t; // shallow copy of scalars
     n->loc = t->loc;
+    n->genericArgs.clear(); // vectors were shallow-copied; rebuild deep
     for (auto *ga : t->genericArgs) n->genericArgs.push_back(type(ga));
     if (t->elem) n->elem = type(t->elem);
     if (t->arraySize) n->arraySize = expr(t->arraySize);
     if (t->retType) n->retType = type(t->retType);
+    n->paramTypes.clear();
     for (auto *p : t->paramTypes) n->paramTypes.push_back(type(p));
     return n;
   }

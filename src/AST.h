@@ -119,6 +119,7 @@ struct EString : Expr {
 struct ENull : Expr { ENull(SourceLoc l) : Expr(NullLit, l) {} };
 struct EIdent : Expr {
   std::string name;
+  TypeExpr *typeArgs = nullptr; // `Option<i32>`: parsed generic args on a type name
   EIdent(SourceLoc l, std::string n) : Expr(Ident, l), name(std::move(n)) {}
 };
 struct ESelf : Expr { ESelf(SourceLoc l) : Expr(Self, l) {} };

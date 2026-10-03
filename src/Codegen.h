@@ -75,6 +75,12 @@ private:
   llvm::Value *emitVariantCtor(ECall *c);
   llvm::Value *emitSelfArg(Expr *obj);
   void emitVptrStoreIfInit(DFunc *f);
+  bool enumHasPayloads(DEnum *e);
+  llvm::Value *emitVariantValue(DEnum *en, unsigned tag, Type *enumTy);
+public:
+  llvm::Type *llvmTypeFor(Type *t) { return llvmType(t); }
+
+private:
   llvm::CallInst *ccall(llvm::FunctionCallee callee, llvm::ArrayRef<llvm::Value *> args,
                         const std::string &name);
   llvm::CallInst *ccall(llvm::FunctionType *fty, llvm::Value *callee,

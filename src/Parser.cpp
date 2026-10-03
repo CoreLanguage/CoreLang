@@ -429,6 +429,7 @@ Expr *Parser::parsePrimary(bool noStructLit) {
       skipNewlines();
       if (!expectPunct("{", "after match expression")) return nullptr;
       auto *m = ctx.make<EMatch>(l);
+      m->scrutinee = scrut;
       skipNewlines();
       while (!atPunct("}")) {
         if (at(Tok::EndOfFile)) {
@@ -438,8 +439,7 @@ Expr *Parser::parsePrimary(bool noStructLit) {
         Pattern *p = parsePattern();
         if (!p) return nullptr;
         skipNewlines();
-        if (!expectPunct("{", "to start match arm body")) return nullptr;
-        Stmt *body = parseBlock(); // parser is positioned after '{'
+        Stmt *body = parseBlock(); // '{' consumed by parseBlock
         if (!body) return nullptr;
         m->arms.push_back({p, body});
         skipNewlines();
@@ -474,7 +474,8 @@ Expr *Parser::parsePrimary(bool noStructLit) {
         break;
       }
       quiet_--;
-      if (ok && eatPunct(">") && atPunct("{") && !tk().newlineBefore) {
+      if (ok && eatPunct(">") &&
+          ((atPunct("{") && !tk().newlineBefore) || atPunct("."))) {
         hasGenerics = true;
       } else {
         i = save; // rewind: not a generic struct literal
@@ -514,8 +515,25 @@ Expr *Parser::parsePrimary(bool noStructLit) {
     }
     // plain (possibly dotted) identifier
     Expr *e = ctx.make<EIdent>(l, parts[0]);
+    if (hasGenerics) {
+      auto *id = (EIdent *)e;
+      auto *ty = ctx.makeNoLoc<TypeExpr>();
+      ty->kind = TypeExpr::Named;
+      ty->nameParts = parts;
+      ty->genericArgs = gargs;
+      ty->loc = l;
+      id->typeArgs = ty;
+    }
     for (size_t k = 1; k < parts.size(); k++) {
       e = ctx.make<EMember>(parts[k].size() ? e->loc : l, e, parts[k]);
+    }
+    // member access after generic args: `Option<i32>.Some(...)`
+    if (hasGenerics && atPunct(".")) {
+      while (atPunct(".") && (tk(1).kind == Tok::Ident || tk(1).kind == Tok::Kw)) {
+        advance();
+        Token nm = advance();
+        e = ctx.make<EMember>(e->loc, e, nm.text);
+      }
     }
     return e;
   }
@@ -607,8 +625,10 @@ Stmt *Parser::parseStatement() {
     auto *s = ctx.make<SIf>(l);
     s->cond = cond;
     s->thenBlock = thenB;
+    size_t save = i;
     skipNewlines();
-    if (eatKw("else")) {
+    if (atKw("else")) {
+      advance();
       skipNewlines();
       if (atKw("if")) s->elseBlock = parseStatement();
       else {
@@ -616,6 +636,8 @@ Stmt *Parser::parseStatement() {
         s->elseBlock = parseBlock();
       }
       if (!s->elseBlock) return nullptr;
+    } else {
+      i = save; // no else: restore the newline as the statement separator
     }
     return s;
   }
@@ -689,6 +711,7 @@ Stmt *Parser::parseStatement() {
     skipNewlines();
     if (!expectPunct("{", "after switch expression")) return nullptr;
     auto *s = ctx.make<SSwitch>(l);
+    s->scrutinee = scrut;
     skipNewlines();
     while (!atPunct("}")) {
       if (at(Tok::EndOfFile)) {

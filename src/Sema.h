@@ -155,7 +155,7 @@ public:
   Type *checkCall(ECall *call);
   Type *checkBuiltinCall(ECall *call, Builtin b, const std::string &name);
   Decl *lookupVariantCtor(const std::string &name, Type **outEnumTy = nullptr);
-  Type *checkVariantCtor(ECall *call, DEnum *e, const std::string &vname);
+  Type *checkVariantCtor(ECall *call, DEnum *e, const std::string &vname, Type *knownType = nullptr);
   void checkPattern(Pattern *p, Type *scrutinee, std::vector<std::pair<std::string, Type *>> &binds);
   bool containsBreak(Stmt *s);
   DFunc *resolveOverload(const std::vector<DFunc *> &cands, const std::vector<Expr *> &args,

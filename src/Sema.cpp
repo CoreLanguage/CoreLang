@@ -435,14 +435,17 @@ std::string Sema::mangleFuncName(DFunc *f, const std::vector<Type *> &genericArg
     out += std::to_string(pn.size()) + pn;
   }
   out += std::to_string(f->name.size()) + f->name;
-  // parameter types disambiguate overloads (and specialize generics)
+  // parameter types disambiguate overloads (and specialize generics);
+  // resolution is quiet: unresolved (template) params use a placeholder
   std::vector<Type *> ptypes;
   bool ptypesOk = true;
+  quiet_++;
   for (auto &p : f->params) {
     Type *pt = resolveType(p.type);
     if (!pt) { ptypesOk = false; break; }
     ptypes.push_back(pt);
   }
+  quiet_--;
   if (ptypesOk && !f->isExtern) {
     out += "I";
     for (size_t pi = 0; pi < ptypes.size(); pi++)
@@ -1199,6 +1202,15 @@ void Sema::checkExpr(Expr *e, bool lvalue) {
       return;
     }
     const std::string &name = id->name;
+    // type with explicit generic args: `Option<i32>` used as a value namespace
+    if (id->typeArgs) {
+      Type *t = resolveType(id->typeArgs);
+      if (!t) return;
+      id->idKind = IdKind::TypeRef;
+      id->target = lookupTypeVisible(name);
+      e->type = t;
+      return;
+    }
     LocalVar lv;
     if (canReadVar(name, lv)) {
       id->idKind = IdKind::Local;
@@ -2142,8 +2154,20 @@ Type *Sema::checkMemberForRead(EMember *m) {
   }
   if (derefTy->isEnum()) {
     DEnum *en = (DEnum *)derefTy->decl;
-    diag.error(m->loc, strfmt("enum values have no members ('%s' is a value of enum '%s')",
-                              m->name.c_str(), en->name.c_str()),
+    for (size_t vi = 0; vi < en->variants.size(); vi++) {
+      if (en->variants[vi].name == m->name) {
+        if (!en->variants[vi].payloadTypes.empty()) {
+          diag.error(m->loc, strfmt("variant '%s' carries data; construct it: '%s(...)'",
+                                    m->name.c_str(), m->name.c_str()));
+          return nullptr;
+        }
+        m->memberKind = MemberKind::VariantOf;
+        m->memberIndex = (int)vi;
+        m->target = en;
+        return derefTy;
+      }
+    }
+    diag.error(m->loc, strfmt("enum '%s' has no variant '%s'", en->name.c_str(), m->name.c_str()),
                "use match to extract variant payloads", 1);
     return nullptr;
   }
@@ -2307,6 +2331,9 @@ Type *Sema::checkCall(ECall *call) {
     if (m->obj->type) {
       Type *ot = m->obj->type;
       Type *derefTy = ot->isPtr() ? ot->pointee : ot;
+      if (derefTy->isEnum()) {
+        return checkVariantCtor(call, (DEnum *)derefTy->decl, m->name, derefTy);
+      }
       if (derefTy->isInterface()) {
         DInterface *iface = (DInterface *)derefTy->ifaceDecl;
         for (size_t mi = 0; mi < iface->methods.size(); mi++)
@@ -2559,6 +2586,7 @@ GenericInstance *Sema::instantiateGeneric(DFunc *tmpl, const std::vector<Type *>
   ASTCloner cloner(ctx);
   DFunc *clone = ctx.make<DFunc>(tmpl->loc);
   clone->name = tmpl->name;
+  clone->genericParams = tmpl->genericParams; // keeps subst active in codegen
   clone->parent = tmpl->parent;
   clone->isPub = tmpl->isPub;
   clone->isStatic = tmpl->isStatic;
@@ -2576,11 +2604,28 @@ GenericInstance *Sema::instantiateGeneric(DFunc *tmpl, const std::vector<Type *>
   return gi;
 }
 
-Type *Sema::checkVariantCtor(ECall *call, DEnum *e, const std::string &vname) {
+Type *Sema::checkVariantCtor(ECall *call, DEnum *e, const std::string &vname, Type *knownType) {
+  std::vector<Type *> knownArgs;
+  if (knownType) knownArgs = knownType->genericArgs;
   for (size_t vi = 0; vi < e->variants.size(); vi++) {
     auto &v = e->variants[vi];
     if (v.name != vname) continue;
     if (v.payloadTypes.empty()) {
+      // unit variant used as a call: allow (returns the enum value)
+      if (call->args.empty()) {
+        if (call->callee->kind == Expr::Ident) {
+          auto *id = (EIdent *)call->callee;
+          id->idKind = IdKind::EnumConst;
+          id->target = e;
+          id->enumTag = (int)vi;
+        } else if (call->callee->kind == Expr::Member) {
+          auto *m = (EMember *)call->callee;
+          m->memberKind = MemberKind::VariantOf;
+          m->memberIndex = (int)vi;
+          m->target = e;
+        }
+        return tc.getEnum(e, knownArgs);
+      }
       diag.error(call->loc, strfmt("variant '%s' has no payload; use '%s' without (...)",
                                    vname.c_str(), vname.c_str()));
       return nullptr;
@@ -2594,7 +2639,10 @@ Type *Sema::checkVariantCtor(ECall *call, DEnum *e, const std::string &vname) {
     std::map<std::string, Type *> sub;
     // infer generic args from payload arguments
     if (!e->genericParams.empty()) {
-      for (auto &gp : e->genericParams) sub[gp] = tc.genericVar(gp);
+      if (!knownArgs.empty()) {
+        for (size_t gi = 0; gi < e->genericParams.size() && gi < knownArgs.size(); gi++)
+          sub[e->genericParams[gi]] = knownArgs[gi];
+      } else for (auto &gp : e->genericParams) sub[gp] = tc.genericVar(gp);
       auto *saved = subst;
       subst = &sub;
       for (size_t ai = 0; ai < call->args.size(); ai++) {
@@ -2922,6 +2970,7 @@ void Sema::checkPattern(Pattern *p, Type *scrutinee, std::vector<std::pair<std::
         for (size_t si = 0; si < p->subs.size(); si++) {
           Pattern *sp = p->subs[si];
           Type *pt = resolveType(payloads[si]);
+          p->payloadTypes.push_back(pt);
           if (sp->kind == Pattern::Var) {
             sp->bindType = pt;
             binds.push_back({sp->name, pt});
@@ -3030,13 +3079,24 @@ DFunc *Sema::resolveOverload(const std::vector<DFunc *> &cands, const std::vecto
     int score = 2;
     bool matches = true;
     quiet_++;
+    // generic candidate: unify parameter types against the arguments
+    std::map<std::string, Type *> vars;
+    auto *savedSubstRO = subst;
+    if (!f->genericParams.empty()) {
+      for (auto &gp : f->genericParams) vars[gp] = tc.genericVar(gp);
+      subst = &vars;
+    }
     for (size_t ai = 0; ai < args.size() && ai < f->params.size(); ai++) {
       Type *want = resolveType(f->params[ai].type);
       Type *got = args[ai]->type;
       if (!want || !got) { matches = false; break; }
       if (tc.same(want, got)) continue;
+      if (!f->genericParams.empty() && want && got && unifyTypes(want, got, vars)) {
+        score = std::min(score, 1);
+        continue;
+      }
       Expr *lit = stripNeg(args[ai]);
-      if (lit && lit->kind == Expr::IntLit && want->isInt()) {
+      if (lit && lit->kind == Expr::IntLit && want && want->isInt()) {
         unsigned bits = primBits(want->prim);
         unsigned long long v = ((EInt *)lit)->value;
         bool fits = want->prim == PRIM_i128 || want->prim == PRIM_u128 || bits >= 64 ||
@@ -3077,6 +3137,7 @@ DFunc *Sema::resolveOverload(const std::vector<DFunc *> &cands, const std::vecto
       matches = false;
       break;
     }
+    subst = savedSubstRO;
     quiet_--;
     if (!matches) continue;
     if (score > bestScore) { bestScore = score; best = f; tie = false; }
