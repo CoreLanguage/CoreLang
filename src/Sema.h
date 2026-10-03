@@ -134,6 +134,11 @@ public:
   unsigned long long evalConstUint(Expr *e, bool &ok);
   bool terminates(Stmt *s);
   bool containsBreak(Stmt *s);
+  bool isConstFoldable(Expr *e) {
+    bool ok = true;
+    evalConstUint(e, ok);
+    return ok;
+  }
   DFunc *resolveOverload(const std::vector<DFunc *> &cands, const std::vector<Expr *> &args,
                          SourceLoc loc, const std::string &name, bool &ok);
   bool typesAssignable(Type *dst, Type *src, Expr *srcExpr, SourceLoc loc, const std::string &what);

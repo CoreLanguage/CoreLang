@@ -1,6 +1,9 @@
 #include "Codegen.h"
 
 #include <llvm/IR/DIBuilder.h>
+#include <llvm/MC/TargetRegistry.h>
+#include <llvm/Target/TargetMachine.h>
+#include <llvm/TargetParser/Host.h>
 #include <llvm/IR/DebugInfo.h>
 #include <llvm/IR/InlineAsm.h>
 #include <llvm/Support/Alignment.h>
@@ -441,6 +444,19 @@ llvm::Constant *Codegen::evalConst(Expr *e) {
 // ============================================================= generation ===
 bool Codegen::generate(llvm::Module &module, ModuleSema *entryModule) {
   mod = &module;
+  { // set the data layout up front so sizeof/alignof see target-true values
+    std::string tripleStr = opts.targetTriple.empty()
+                                ? std::string(llvm::sys::getDefaultTargetTriple())
+                                : opts.targetTriple;
+    std::string err;
+    if (const llvm::Target *t = llvm::TargetRegistry::lookupTarget(tripleStr, err)) {
+      llvm::TargetOptions topts;
+      std::unique_ptr<llvm::TargetMachine> tm(
+          t->createTargetMachine(tripleStr, "generic", "", topts, llvm::Reloc::PIC_));
+      module.setTargetTriple(tripleStr);
+      module.setDataLayout(tm->createDataLayout());
+    }
+  }
   mod->setTargetTriple(llvm::Triple::normalize(
       opts.targetTriple.empty() ? std::string(llvm::sys::getDefaultTargetTriple()) : opts.targetTriple));
 
@@ -1261,7 +1277,11 @@ llvm::Value *Codegen::emitCall(ECall *c) {
         std::vector<llvm::Value *> args{self};
         for (size_t ai = 0; ai < f->params.size(); ai++) {
           if (ai < c->args.size()) args.push_back(emitExpr(c->args[ai]));
-          else if (f->params[ai].defVal) args.push_back(emitExpr(f->params[ai].defVal));
+          else if (f->params[ai].defVal) {
+            Type *want = sema.resolveType(f->params[ai].type);
+            args.push_back(coerceValue(emitExpr(f->params[ai].defVal), want,
+                                       f->params[ai].defVal->type));
+          }
         }
         return ccall(impl, args, "call.base");
       }
@@ -1290,9 +1310,8 @@ llvm::Value *Codegen::emitCall(ECall *c) {
         }
       }
       llvm::Value *self = emitSelfArg(m->obj);
-      std::vector<llvm::Value *> args;
-      if (!f->isStatic) args.push_back(self);
-      for (auto *a : c->args) args.push_back(emitExpr(a));
+      std::vector<llvm::Value *> args = emitCallArgs(f, c);
+      if (!f->isStatic) args.insert(args.begin(), self);
 
       if (virtualCall && !f->isStatic) {
         Type *derefTy = m->obj->type->isPtr() ? m->obj->type->pointee : m->obj->type;
@@ -1392,6 +1411,16 @@ llvm::Value *Codegen::coerceValue(llvm::Value *v, Type *want, Type *got) {
   if (got->isFloat() && got->prim == PRIM_f32 && want->isFloat() && want->prim == PRIM_f64)
     return builder.CreateFPExt(v, builder.getDoubleTy());
   if (got->isBool() && want->isInt()) return builder.CreateZExt(v, llvmType(want));
+  // integer widening/narrowing for default-arg literals
+  if (got->isInt() && want->isInt() && !tc.same(want, got)) {
+    llvm::Type *lt = llvmType(want);
+    unsigned sb = v->getType()->getIntegerBitWidth();
+    unsigned db = lt->getIntegerBitWidth();
+    if (db < sb) return builder.CreateTrunc(v, lt);
+    if (db > sb)
+      return primIsSigned(got->prim) ? builder.CreateSExt(v, lt) : builder.CreateZExt(v, lt);
+    return v;
+  }
   return v;
 }
 
@@ -1403,7 +1432,8 @@ std::vector<llvm::Value *> Codegen::emitCallArgs(DFunc *f, ECall *c) {
       Type *want = sema.resolveType(f->params[ai].type);
       args.push_back(coerceValue(v, want, c->args[ai]->type));
     } else if (f->params[ai].defVal) {
-      args.push_back(emitExpr(f->params[ai].defVal));
+      Type *want = sema.resolveType(f->params[ai].type);
+      args.push_back(coerceValue(emitExpr(f->params[ai].defVal), want, f->params[ai].defVal->type));
     }
   }
   // variadic extras
@@ -1815,10 +1845,12 @@ llvm::Value *Codegen::emitStructLit(EStructLit *sl) {
     builder.CreateStore(val, fptr);
     (void)ft;
   }
-  // classes: run the constructor after field initialization
-  if (ty->isClass()) {
-    DClass *c = (DClass *)ty->decl;
-    for (DFunc *mth : c->methods) {
+  // classes/structs with constructors: run init after field initialization
+  if (ty->isClass() || ty->isStruct()) {
+    Decl *cd = (Decl *)ty->decl;
+    std::vector<DFunc *> cm = cd->kind == Decl::Class ? ((DClass *)cd)->methods
+                                                      : ((DStruct *)cd)->methods;
+    for (DFunc *mth : cm) {
       if (mth->name == "init" && !mth->isStatic) {
         // only when all constructor params have defaults (no args available here)
         bool callable = true;
@@ -1828,12 +1860,16 @@ llvm::Value *Codegen::emitStructLit(EStructLit *sl) {
           llvm::Function *impl = declareFunc(mth, {});
           std::vector<llvm::Value *> args{slot};
           for (auto &p : mth->params) {
-            if (p.defVal) args.push_back(emitExpr(p.defVal));
+            if (p.defVal) {
+              Type *want = sema.resolveType(p.type);
+              args.push_back(coerceValue(emitExpr(p.defVal), want, p.defVal->type));
+            }
           }
           ccall(impl, args, "call.init");
         } else {
-          diag.error(sl->loc, strfmt("constructor of '%s' requires arguments",
-                                     c->name.c_str()),
+          std::string tn = cd->kind == Decl::Class ? ((DClass *)cd)->name
+                                                   : ((DStruct *)cd)->name;
+          diag.error(sl->loc, strfmt("constructor of '%s' requires arguments", tn.c_str()),
                      "allocate with alloc<T>() and call init(...) explicitly", 1);
         }
         break;

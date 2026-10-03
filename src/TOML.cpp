@@ -177,11 +177,11 @@ bool TOML::parse(const std::string &text, TOMLValue &outRoot, std::string &err) 
         }
       }
       if (arrayTable) {
-        // [[name]]: append a fresh table to the named array
+        // [[name]]: append a fresh table to the root-level named array
         TOMLValue tv;
         tv.kind = TOMLValue::Table;
-        t->tableArrays[parts[0]].push_back(tv);
-        p.cur = &t->tableArrays[parts[0]].back();
+        p.root.tableArrays[parts[0]].push_back(tv);
+        p.cur = &p.root.tableArrays[parts[0]].back();
       } else {
         p.cur = t;
       }

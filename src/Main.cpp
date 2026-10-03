@@ -107,8 +107,12 @@ int main(int argc, char **argv) {
   }
   if (cmd == "check") {
     if (positionals.empty()) {
-      fprintf(stderr, "error: usage: core check <file-or-project-dir>\n");
-      return 2;
+      // in a project: check the main source file
+      if (fileExists(manifestPath())) positionals.push_back("src/main.cr");
+      else {
+        fprintf(stderr, "error: usage: core check <file.cr>\n");
+        return 2;
+      }
     }
     // inside a project: resolve dependencies first
     if (fileExists(manifestPath())) {

@@ -594,15 +594,16 @@ def test_codegen_internals(w):
 
 def test_cross_freestanding(w):
     src = 'func main() {\n    say "cross"\n}\n'
+    with open(os.path.join(w, "cross.cr"), "w") as f:
+        f.write(src)
     r = run([CORE, "compile", "cross.bin", "cross.cr", "--target=aarch64"], cwd=w)
     objp = os.path.join(w, "cross.bin.coreobj.o")
     check("aarch64 cross compilation emits an object",
           r.returncode == 0 and os.path.exists(objp) and "cross-compiling" in r.stderr, r.stderr)
-    if os.path.exists(os.path.join(w, "cross.coreobj.o")):
-        with open(os.path.join(w, "cross.coreobj.o"), "rb") as f:
+    if os.path.exists(os.path.join(w, "cross.bin.coreobj.o")):
+        with open(os.path.join(w, "cross.bin.coreobj.o"), "rb") as f:
             header = f.read(20)
-        check("aarch64 object is real AArch64 machine code", b"ARM" in header or b"aarch64" in header,
-              header[:20])
+        check("aarch64 object is real AArch64 machine code", b"ARM" in header, header[:20])
 
     # freestanding: kernel with custom entry, no runtime
     with open(os.path.join(w, "kernel.cr"), "w") as f:

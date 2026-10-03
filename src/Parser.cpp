@@ -269,26 +269,6 @@ Expr *Parser::parseUnary() {
 }
 
 Expr *Parser::parsePostfix() {
-  // `say expr` is sugar for `say(expr)`: the print statement of Core.
-  // Only the bare identifier at expression start gets this treatment, and
-  // only when not immediately followed by a call, member access or assignment.
-  if (atIdent() && tk().text == "say") {
-    const Token &n = tk(1);
-    bool special = n.kind == Tok::Punct &&
-                   (n.text == "(" || n.text == "." || n.text == "=" || n.text == "+=" ||
-                    n.text == "-=" || n.text == "*=" || n.text == "/=" || n.text == "%=" ||
-                    n.text == "&=" || n.text == "|=" || n.text == "^=" || n.text == "<<=" ||
-                    n.text == ">>=" || n.text == ",");
-    bool endsExpr = n.kind == Tok::Newline || n.kind == Tok::EndOfFile ||
-                    (n.kind == Tok::Punct && n.text == "}");
-    if (!special && !endsExpr) {
-      Token sayTok = advance();
-      Expr *arg = parseBinary(1);
-      if (!arg) return nullptr;
-      auto *ident = ctx.make<EIdent>(sayTok.loc, "say");
-      return ctx.make<ECall>(sayTok.loc, ident, std::vector<Expr *>{arg});
-    }
-  }
   Expr *e = parsePrimary();
   if (!e) return nullptr;
   while (true) {
@@ -665,9 +645,11 @@ Stmt *Parser::parseStatement() {
   }
   if (atKw("for")) {
     advance();
-    // detect form: `for x in ...` vs C-style `for i = 0; ...`
-    bool looksLikeForIn = (atIdent() || atKw("mut")) &&
-                          (tk(1).kind == Tok::Kw && tk(1).text == "in");
+    // detect form: `for x in ...` / `for mut x in ...` vs C-style `for i = 0; ...`
+    bool looksLikeForIn = false;
+    if (atIdent() && tk(1).kind == Tok::Kw && tk(1).text == "in") looksLikeForIn = true;
+    if (atKw("mut") && tk(1).kind == Tok::Ident && tk(2).kind == Tok::Kw && tk(2).text == "in")
+      looksLikeForIn = true;
     if (looksLikeForIn) {
       auto *s = ctx.make<SForIn>(l);
       s->isMut = eatKw("mut");
@@ -844,7 +826,7 @@ Stmt *Parser::parseLetOrExpr(bool forceMut) {
   // plain `name = init` declaration (Go-like) when it cannot be an assignment:
   // decide in sema — the parser builds SLet with a sentinel init=nullptr only if
   // next is '='; otherwise fall through to expression/assignment.
-  if (atIdent() && tk(1).kind == Tok::Punct && tk(1).text == "=" && !isMut) {
+  if (atIdent() && tk(1).kind == Tok::Punct && tk(1).text == "=") {
     // This is either a new variable (`x = 10`) or an assignment. The sema pass
     // resolves the difference; the parser marks it via a Let with empty type.
     Token n = advance();
@@ -854,9 +836,29 @@ Stmt *Parser::parseLetOrExpr(bool forceMut) {
     auto *sl = ctx.make<SLet>(l);
     sl->name = n.text;
     sl->init = init;
-    sl->isMut = false;
+    sl->isMut = isMut; // `mut x = ...` declares a mutable variable
     sl->isDeclOrAssign = true;
     return sl;
+  }
+  // `say expr` is statement-level sugar for `say(expr)`: the print statement.
+  // It grabs the full expression so `say x + y` prints (x + y).
+  if (atIdent() && tk().text == "say") {
+    const Token &n = tk(1);
+    bool special = n.kind == Tok::Punct &&
+                   (n.text == "." || n.text == "=" || n.text == "+=" ||
+                    n.text == "-=" || n.text == "*=" || n.text == "/=" || n.text == "%=" ||
+                    n.text == "&=" || n.text == "|=" || n.text == "^=" || n.text == "<<=" ||
+                    n.text == ">>=" || n.text == ",");
+    bool endsExpr = n.kind == Tok::Newline || n.kind == Tok::EndOfFile ||
+                    (n.kind == Tok::Punct && n.text == "}");
+    if (!special && !endsExpr) {
+      Token sayTok = advance();
+      Expr *arg = parseBinary(1);
+      if (!arg) return nullptr;
+      auto *ident = ctx.make<EIdent>(sayTok.loc, "say");
+      Expr *call = ctx.make<ECall>(sayTok.loc, ident, std::vector<Expr *>{arg});
+      return ctx.make<SExpr>(l, call);
+    }
   }
   // plain expression or assignment statement
   Expr *e = parseAssignExpr();
@@ -944,9 +946,10 @@ DFunc *Parser::parseFuncRest(bool isPub, Decl *parent, unsigned mods, std::strin
   }
   if (atPunct(";")) { advance(); f->body = nullptr; return f; } // prototype with ';'
   // a prototype may also end at a newline / declaration boundary (extern + interfaces)
-  if (at(Tok::Newline) || at(Tok::EndOfFile) || atKw("extern") || atKw("pub") || atKw("func") ||
-      atKw("struct") || atKw("class") || atKw("interface") || atKw("trait") || atKw("enum") ||
-      atKw("import") || atPunct("@") || atKw("abstract") || atKw("virtual") || atKw("override")) {
+  if (at(Tok::Newline) || at(Tok::EndOfFile) || atPunct("}") || atKw("extern") || atKw("pub") ||
+      atKw("func") || atKw("struct") || atKw("class") || atKw("interface") || atKw("trait") ||
+      atKw("enum") || atKw("import") || atPunct("@") || atKw("abstract") || atKw("virtual") ||
+      atKw("override")) {
     f->body = nullptr;
     return f; // newline NOT consumed: parseFile handles it
   }
@@ -981,8 +984,15 @@ DStruct *Parser::parseStruct(bool isPub, bool packed) {
       errorAt(loc(), "unexpected end of file inside struct", "", 0);
       return nullptr;
     }
+    if (getenv("CORE_DBG")) fprintf(stderr, "[struct] loop top, tk='%s' kind=%d\n", tk().text.c_str(), (int)tk().kind);
+    unsigned smethods = 0;
+    while (atKw("pub") || atKw("static")) {
+      std::string m = advance().text;
+      if (m == "pub") smethods |= MOD_PUB;
+      else smethods |= MOD_STATIC;
+    }
     if (eatKw("func")) {
-      DFunc *m = parseFuncRest(s->isPub, s, 0, "");
+      DFunc *m = parseFuncRest(smethods & MOD_PUB, s, smethods, "");
       if (!m) return nullptr;
       s->methods.push_back(m);
     } else {
@@ -997,11 +1007,12 @@ DStruct *Parser::parseStruct(bool isPub, bool packed) {
         if (!defVal) return nullptr;
       }
       s->fields.push_back({fn.text, ty, defVal, fn.loc});
+      if (getenv("CORE_DBG")) fprintf(stderr, "[struct] field %s ok, next=%s\n", fn.text.c_str(), tk().text.c_str());
     }
     if (at(Tok::Newline)) { skipNewlines(); continue; }
-    if (atPunct(",")) { skipNewlines(); continue; }
+    if (atPunct(",")) { advance(); skipNewlines(); continue; }
     if (atPunct("}")) break;
-    if (atPunct(";")) { skipNewlines(); continue; }
+    if (atPunct(";")) { advance(); skipNewlines(); continue; }
     errorAt(loc(), strfmt("expected newline or '}' in struct body, found '%s'", tk().text.c_str()), "", tk().len);
     return nullptr;
   }
@@ -1075,9 +1086,9 @@ DClass *Parser::parseClass(bool isPub, bool packed) {
       (void)fieldPub;
     }
     if (at(Tok::Newline)) { skipNewlines(); continue; }
-    if (atPunct(",")) { skipNewlines(); continue; }
+    if (atPunct(",")) { advance(); skipNewlines(); continue; }
     if (atPunct("}")) break;
-    if (atPunct(";")) { skipNewlines(); continue; }
+    if (atPunct(";")) { advance(); skipNewlines(); continue; }
     errorAt(loc(), strfmt("expected newline or '}' in class body, found '%s'", tk().text.c_str()), "", tk().len);
     return nullptr;
   }
@@ -1172,7 +1183,7 @@ DEnum *Parser::parseEnum(bool isPub) {
     if (at(Tok::Newline)) { skipNewlines(); continue; }
     if (eatPunct(",")) { skipNewlines(); continue; }
     if (atPunct("}")) break;
-    if (atPunct(";")) { skipNewlines(); continue; }
+    if (atPunct(";")) { advance(); skipNewlines(); continue; }
     errorAt(loc(), strfmt("expected newline, ',' or '}' in enum body, found '%s'", tk().text.c_str()), "", tk().len);
     return nullptr;
   }

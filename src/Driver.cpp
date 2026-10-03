@@ -135,7 +135,7 @@ bool Driver::loadModule(const std::string &path, std::vector<std::string> &chain
     }
     if (!loadModule(depPath, chain)) return false;
     ModuleSema *dep = byCanonicalPath[depPath];
-    std::string importName = im->alias.empty() ? im->parts[0] : im->alias;
+    std::string importName = im->alias.empty() ? im->parts.back() : im->alias;
     bool found = false;
     for (auto &[n, m] : ms->imports)
       if (n == importName) found = true;

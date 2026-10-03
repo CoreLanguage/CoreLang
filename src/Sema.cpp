@@ -224,20 +224,28 @@ void Sema::buildLayout(DClass *c) {
   l->cls = c;
   layouts[c] = l;
 
-  // resolve base
+  // resolve base: the first name may be an interface (implement, not inherit)
   if (c->base) {
     Type *bt = resolveType(c->base);
-    if (!bt || !bt->isClass()) {
+    if (bt && bt->isInterface()) {
+      DInterface *iface = (DInterface *)bt->ifaceDecl;
+      bool already = false;
+      for (auto &[iff, _] : l->interfaces)
+        if (iff == iface) already = true;
+      if (!already) l->interfaces.push_back({iface, ""});
+      c->base = nullptr; // no base class: implementing, not inheriting
+    } else if (!bt || !bt->isClass()) {
       diag.error(c->base->loc, "base class must be a class type", "", 1);
       return;
+    } else {
+      DClass *base = (DClass *)bt->decl;
+      if (base == c) {
+        diag.error(c->loc, strfmt("class '%s' cannot inherit from itself", c->name.c_str()));
+        return;
+      }
+      if (!layouts.count(base)) buildLayout(base);
+      l->base = base;
     }
-    DClass *base = (DClass *)bt->decl;
-    if (base == c) {
-      diag.error(c->loc, strfmt("class '%s' cannot inherit from itself", c->name.c_str()));
-      return;
-    }
-    if (!layouts.count(base)) buildLayout(base);
-    l->base = base;
   }
   // polymorphic?
   bool poly = false;
@@ -678,6 +686,10 @@ bool Sema::typesAssignable(Type *dst, Type *src, Expr *srcExpr, SourceLoc loc,
     al->type = dst;
     return true;
   }
+  // ptr<[T; N]> -> ptr<T>: same address, element view (array decay)
+  if (src->isPtr() && src->pointee->isArray() && dst->isPtr() &&
+      tc.same(src->pointee->elem, dst->pointee))
+    return true;
   // FFI: string -> ptr<char> (the string view's data pointer)
   if (src->isString() && dst->isPtr() && dst->pointee->isPrim() &&
       dst->pointee->prim == PRIM_char)
@@ -859,6 +871,11 @@ void Sema::checkFuncDecl(DFunc *f, std::map<std::string, Type *> genericSubst) {
     if (pt->isVoid()) {
       diag.error(p.loc, strfmt("parameter '%s' cannot have type void", p.name.c_str()));
       continue;
+    }
+    if (p.defVal) {
+      checkExpr(p.defVal);
+      if (p.defVal->type && !typesAssignable(pt, p.defVal->type, p.defVal, p.loc, "default value"))
+        goto done;
     }
     LocalVar lv;
     lv.type = pt;
@@ -1111,6 +1128,32 @@ void Sema::checkStmt(Stmt *s) {
       auto *r = (ERange *)f->iterable;
       checkExpr(r->lo);
       checkExpr(r->hi);
+      // literal bound adopts the other side's type (e.g. `0..len(s)`)
+      auto refitBound = [&](Expr *&side, Expr *other) {
+        if (!side || !other || !other->type) return;
+        if ((side->kind == Expr::IntLit || isConstFoldable(side)) && other->type->isInt() &&
+            side->type && !tc.same(side->type, other->type)) {
+          // re-type constant bounds to the other side's type
+          bool ok = true;
+          unsigned long long v = evalConstUint(side, ok);
+          if (ok) {
+            unsigned bits = primBits(other->type->prim);
+            bool fits = bits >= 64 || (v >> bits) == 0;
+            if (primIsSigned(other->type->prim) && bits < 64) {
+              long long sv = (long long)v;
+              fits = sv >= -(1LL << (bits - 1)) && sv <= (1LL << (bits - 1)) - 1;
+            }
+            if (fits) {
+              Expr *retyped = new EInt(side->loc);
+              ((EInt *)retyped)->value = v;
+              retyped->type = other->type;
+              side = retyped;
+            }
+          }
+        }
+      };
+      refitBound(r->lo, r->hi);
+      refitBound(r->hi, r->lo);
       if (r->lo->type && r->hi->type) {
         if (!r->lo->type->isInt() || !r->hi->type->isInt()) {
           diag.error(r->loc, "range bounds must be integers");
@@ -1469,7 +1512,12 @@ void Sema::checkExpr(Expr *e, bool lvalue) {
       for (auto it = chain.rbegin(); it != chain.rend(); ++it)
         for (auto &f : (*it)->fields) fieldList.push_back({f.name, f.type});
     }
-    bool isClassLit = ty->isClass(); // classes construct via init(): fields optional
+    // types with an init() constructor build via init(): fields optional
+    bool hasCtor = false;
+    for (auto *mth : (td->kind == Decl::Class ? std::vector<DFunc *>(((DClass *)td)->methods)
+                                              : std::vector<DFunc *>(((DStruct *)td)->methods)))
+      if (mth->name == "init" && !mth->isStatic) hasCtor = true;
+    bool isClassLit = ty->isClass() || hasCtor;
     if (!isClassLit && sl->fields.size() != fieldList.size()) {
       diag.error(e->loc, strfmt("'%s' literal requires all %zu fields, got %zu",
                                 typeToString(ty).c_str(), fieldList.size(), sl->fields.size()));
@@ -2174,11 +2222,11 @@ Type *Sema::checkCall(ECall *call) {
     return nullptr;
   }
 
-  // ---- builtins ----
+  // ---- builtins ---- (user-defined functions shadow compiler builtins)
   if (callee->kind == Expr::Ident) {
     auto *id = (EIdent *)callee;
     int b;
-    if (builtinByName(id->name, b)) {
+    if (builtinByName(id->name, b) && lookupFuncsVisible(id->name).empty()) {
       for (auto *a : call->args) checkExpr(a);
       id->idKind = IdKind::Builtin;
       id->builtin = b;
@@ -2426,6 +2474,20 @@ Type *Sema::checkCall(ECall *call) {
   DFunc *chosen = resolveOverload(candidates, call->args, call->loc, name, ok);
   if (!ok || !chosen) return nullptr;
   call->resolvedFunc = chosen;
+  // finalize literal coercions against the chosen overload; constant-foldable
+  // arguments (e.g. `4 * 10`) are accepted for in-range integer params (the
+  // codegen casts them)
+  quiet_++;
+  for (size_t ai = 0; ai < call->args.size() && ai < chosen->params.size(); ai++) {
+    Type *want = resolveType(chosen->params[ai].type);
+    Type *got = call->args[ai]->type;
+    if (!want || !got || tc.same(want, got)) continue;
+    bool foldOk = true;
+    unsigned long long fv = evalConstUint(call->args[ai], foldOk);
+    if (foldOk && want->isInt() && got->isInt()) continue; // coerced in codegen
+    typesAssignable(want, got, call->args[ai], call->args[ai]->loc, "argument");
+  }
+  quiet_--;
   // annotate the callee so codegen finds the implementation
   if (callee->kind == Expr::Ident) {
     auto *id = (EIdent *)callee;
@@ -2506,7 +2568,12 @@ bool Sema::unifyTypes(Type *want, Type *got, std::map<std::string, Type *> &vars
   if (tc.same(want, got)) return true;
   // literal fit
   if (got->kind == TypeKind::Prim && want->isInt()) return got->isInt();
-  if (want->isPtr() && got->isPtr()) return unifyTypes(want->pointee, got->pointee, vars);
+  if (want->isPtr() && got->isPtr()) {
+    // array decay: ptr<[T; N]> argument against ptr<T> binds T to the element
+    if (got->pointee->isArray() && want->pointee->isNamedGeneric)
+      return unifyTypes(want->pointee, got->pointee->elem, vars);
+    return unifyTypes(want->pointee, got->pointee, vars);
+  }
   if (want->kind == TypeKind::Struct && got->kind == TypeKind::Struct && want->decl == got->decl) {
     if (want->genericArgs.size() != got->genericArgs.size()) return false;
     for (size_t i = 0; i < want->genericArgs.size(); i++)
@@ -2894,6 +2961,13 @@ void Sema::checkPattern(Pattern *p, Type *scrutinee, std::vector<std::pair<std::
   case Pattern::Wild:
     return;
   case Pattern::Var: {
+    // capitalized names in patterns are variant names and must resolve
+    if (!scrutinee->isEnum() && !p->name.empty() && isupper(p->name[0])) {
+      diag.error(p->loc, strfmt("pattern '%s' looks like a variant but the match scrutinee is '%s'",
+                                p->name.c_str(), typeToString(scrutinee).c_str()),
+                 "variant patterns require an enum; use a literal or `_` otherwise", 1);
+      return;
+    }
     if (scrutinee->isEnum()) {
       DEnum *en = (DEnum *)scrutinee->decl;
       for (size_t vi = 0; vi < en->variants.size(); vi++) {
@@ -3045,7 +3119,13 @@ DFunc *Sema::resolveOverload(const std::vector<DFunc *> &cands, const std::vecto
     for (size_t pi = args.size(); pi < f->params.size(); pi++)
       if (!f->params[pi].defVal) { arityOk = false; break; }
     if (!arityOk) continue;
-    if (!f->isVariadic && args.size() != f->params.size()) continue;
+    if (!f->isVariadic && args.size() != f->params.size()) {
+      // allow a fully-defaulted tail (default arguments)
+      bool tailDefaults = f->params.size() > args.size();
+      for (size_t pi = args.size(); pi < f->params.size(); pi++)
+        if (!f->params[pi].defVal) tailDefaults = false;
+      if (!tailDefaults) continue;
+    }
     int score = 2;
     bool matches = true;
     quiet_++;
@@ -3064,6 +3144,19 @@ DFunc *Sema::resolveOverload(const std::vector<DFunc *> &cands, const std::vecto
       if (!f->genericParams.empty() && want && got && unifyTypes(want, got, vars)) {
         score = std::min(score, 1);
         continue;
+      }
+      // constant-foldable argument (e.g. `4 * 10`) fits any in-range integer type
+      bool foldOk = true;
+      unsigned long long fv = evalConstUint(args[ai], foldOk);
+      if (foldOk && want && want->isInt() && args[ai]->kind != Expr::IntLit) {
+        unsigned bits = primBits(want->prim);
+        bool fits = want->prim == PRIM_i128 || want->prim == PRIM_u128 || bits >= 64 ||
+                    (fv >> bits) == 0;
+        if (primIsSigned(want->prim) && bits < 64) {
+          long long sv = (long long)fv;
+          fits = sv >= -(1LL << (bits - 1)) && sv <= (1LL << (bits - 1)) - 1;
+        }
+        if (fits) { score = std::min(score, 1); continue; }
       }
       Expr *lit = stripNeg(args[ai]);
       if (lit && lit->kind == Expr::IntLit && want && want->isInt()) {
@@ -3093,6 +3186,12 @@ DFunc *Sema::resolveOverload(const std::vector<DFunc *> &cands, const std::vecto
         for (auto &[iff, _] : sl->interfaces)
           if (iff == (DInterface *)want->ifaceDecl) impl = true;
         if (impl) { score = std::min(score, 1); continue; }
+      }
+      // ptr<[T; N]> -> ptr<T> (array decay)
+      if (got->isPtr() && got->pointee->isArray() && want->isPtr() &&
+          tc.same(got->pointee->elem, want->pointee)) {
+        score = std::min(score, 1);
+        continue;
       }
       // FFI: string -> ptr<char>
       if (got->isString() && want->isPtr() && want->pointee->isPrim() &&
