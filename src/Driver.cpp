@@ -264,6 +264,7 @@ int runPipelineInternal(Driver &driver, const std::string &outputName, const std
     mpm.run(module, mam);
   }
 
+  if (mode == PipelineMode::Check) return 0; // type-check only, no codegen
   if (mode == PipelineMode::PrintIR) {
     module.print(llvm::outs(), nullptr);
     return 0;

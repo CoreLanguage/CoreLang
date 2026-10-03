@@ -110,6 +110,16 @@ int main(int argc, char **argv) {
       fprintf(stderr, "error: usage: core check <file-or-project-dir>\n");
       return 2;
     }
+    // inside a project: resolve dependencies first
+    if (fileExists(manifestPath())) {
+      Diagnostics diag(*(new SourceMgr()));
+      Manifest m;
+      if (setupProjectDriverForCheck(dopts, m, diag)) {
+        Driver d(dopts);
+        return d.check(positionals[0]);
+      }
+      return 1;
+    }
     Driver d(dopts);
     return d.check(positionals[0]);
   }

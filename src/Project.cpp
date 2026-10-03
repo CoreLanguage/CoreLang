@@ -312,6 +312,11 @@ bool fetchPackage(const std::string &spec, std::string &outCheckout, std::string
 }
 
 // ------------------------------------------------------------------- init ---
+static bool setupProjectDriver(DriverOptions &opts, Manifest &m, Diagnostics &diag);
+bool setupProjectDriverForCheck(DriverOptions &opts, Manifest &m, Diagnostics &diag) {
+  return setupProjectDriver(opts, m, diag);
+}
+
 int cmdInit(const std::string &name, DriverOptions &opts) {
   (void)opts;
   Diagnostics diag(*(new SourceMgr()));
@@ -495,18 +500,19 @@ int cmdTest(DriverOptions &opts) {
   for (auto &tf : testFiles) {
     DriverOptions topts = opts;
     Driver d(topts);
-    // a test file's main runs its tests
-    std::string out = "./core_test_" + tf;
-    size_t slash = out.find_last_of('/');
-    std::string outName = slash == std::string::npos ? out : out.substr(slash + 1);
+    // output name = the test file's basename (no path, no extension)
+    size_t slash = tf.find_last_of('/');
+    std::string base = slash == std::string::npos ? tf : tf.substr(slash + 1);
+    size_t dot = base.find_last_of('.');
+    if (dot != std::string::npos) base = base.substr(0, dot);
+    std::string outName = "core_test_" + base;
     int rc = d.compile(outName, tf);
     if (rc != 0) {
       failures++;
       continue;
     }
-    std::string runCmd = outName;
     printf("---- running %s\n", tf.c_str());
-    int code = system(runCmd.c_str());
+    int code = system(("./" + outName).c_str());
     total++;
     if (code != 0) failures++;
     std::string rm = "rm -f " + outName;
@@ -652,6 +658,11 @@ int cmdUpdate(DriverOptions &opts) {
   }
   saveLockfile(lockfilePath(), lock);
   printf("core.lock updated\n");
+  return 0;
+}
+
+int cmdCheckFile(DriverOptions &opts) {
+  // used by `core check` when a manifest exists: resolve dependencies first
   return 0;
 }
 

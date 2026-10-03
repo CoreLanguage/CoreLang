@@ -47,6 +47,7 @@ bool loadLockfile(const std::string &path, std::vector<LockEntry> &out);
 bool saveLockfile(const std::string &path, const std::vector<LockEntry> &entries);
 
 int cmdInit(const std::string &name, DriverOptions &opts);
+bool setupProjectDriverForCheck(DriverOptions &opts, Manifest &m, Diagnostics &diag);
 int cmdBuild(DriverOptions &opts);
 int cmdRun(DriverOptions &opts, const std::vector<std::string> &args);
 int cmdTest(DriverOptions &opts);
