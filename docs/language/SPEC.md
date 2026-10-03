@@ -275,8 +275,9 @@ expression (newline-terminated statements, §2.2).
 - **Comparison** `== != < <= > >=`: numeric operands shall have the same
   type (no implicit conversion). Result is `bool`. Signed types compare
   signed, unsigned compare unsigned. Pointers compare unsigned.
-  `bool` supports `==`/`!=` only. Enums support `==`/`!=` on the same
-  enum type.
+  `bool` supports `==`/`!=` only. Enums support `==`/`!=` within the
+  same enum type — but **payload-free enums only**; comparing values of
+  a data-carrying enum is an error (compare with `match`).
 - **Strings**: `+` concatenates (allocates a fresh buffer via the
   runtime); `== != < <= > >=` compare lexicographically byte-wise.
 - **Pointers**: `p + i`, `i + p`, `p - i` scale by the pointee size
@@ -506,7 +507,9 @@ enum Option<T> { Some(T), None }
   arguments may infer the enum's generic arguments), or a bare
   `Some(5)` when the variant name is unique. A unit variant used with
   `(...)` and no arguments is allowed.
-- `==`/`!=` compare tags and work on any enum of the same type.
+- `==`/`!=` compare tags and are allowed on payload-free enums of the
+  same type; comparing data-carrying enum values is an error — use
+  `match`.
 
 ### 5.10 Function types and closures
 
@@ -695,8 +698,10 @@ name = match n {            // non-enum scrutinee: literal patterns
 }
 ```
 
-- The scrutinee may be an enum, integer, `char`, `bool`, `string`, or
-  pointer (literal patterns compare with `==`).
+- The scrutinee may be an enum, integer, `char`, `bool`, or pointer
+  (literal patterns compare with `==`). A `string` scrutinee is not
+  supported in v1 (rejected; compare with `str_eq` or `==` before the
+  match).
 - Patterns: `_` (wildcard), a binding name (binds the whole scrutinee,
   **immutable**), an enum variant with payload bindings `Some(v)` /
   `Some(v, _)`, a bare unit-variant name, or a constant/literal
@@ -782,8 +787,9 @@ aborts the process. Inside `unsafe`, indexing is unchecked.
 
 ## 11. Execution and linking
 
-- The compiler emits one object file (`<name>.coreobj.o`, removed after
-  linking) and invokes `cc` with the Core runtime (`corert.o`) plus
+- The compiler emits one object file (`<name>.coreobj.o`, kept next to
+  the output as a build artifact) and invokes `cc` with the Core
+  runtime (`corert.o`) plus
   `-lm -lpthread -ldl -latomic`, the project's `[build]` link settings,
   and user `--link*` flags. The result is a self-contained native
   executable; imports are baked in (§1).

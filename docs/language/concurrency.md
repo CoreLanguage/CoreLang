@@ -65,9 +65,8 @@ say count                              // prints 0
 import memory
 import thread
 
-state = alloc<i64>()          // heap: one shared cell (global; see note)
-
 func main() {
+    state = alloc<i64>()      // heap: one shared cell
     *state = 0
     w = thread.spawn(func() {
         unsafe { *state += 1 }
@@ -81,7 +80,8 @@ func main() {
 - `self` in a method is captured by value like any local (the pointer is
   copied — the object itself is shared).
 - Captured pointers must point at memory that outlives the thread:
-  heap allocations, globals, or `tls` — not the spawning frame's locals.
+  heap allocations or globals — not the spawning frame's locals (and a
+  `tls` variable's address points at the *creating* thread's instance).
 
 ---
 
@@ -277,17 +277,18 @@ func main() {
     data: [f64; 8] = [0.0; 8]
     half = 4
     w = thread.spawn(func() {
-        // reading data is fine here; see the note below before WRITING
+        // `data` is captured BY VALUE: the closure reads its own copy
         for i in 0..half { say data[i] as i64 }
     })
     thread.join(w)
 }
 ```
 
-Be careful with writes: elements of one array are adjacent bytes; two
+To genuinely share one array, heap-allocate it and share the pointer —
+and then be careful with writes: elements are adjacent bytes, and two
 threads writing `data[3]` and `data[4]` are a data race by the C11
-definition. Copy sub-ranges into per-thread heap buffers and merge
-after join.
+definition. Give each thread a disjoint sub-range (with padding between
+them) or copy sub-ranges into per-thread buffers and merge after join.
 
 ### 6.4 Shutdown flag with atomics
 
@@ -311,7 +312,7 @@ func main() {
 ## 7. Pitfalls checklist
 
 1. **Assuming captures are shared.** They are copies (§2). Share via
-   pointers to heap memory, globals, or `tls`-free statics.
+   pointers to heap memory, or via globals.
 2. **Data races on plain variables.** Every cross-thread access needs a
    lock, an atomic, or happens-before via spawn/join.
 3. **Dangling shared state.** A pointer to a spawner's local outlives

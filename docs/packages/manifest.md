@@ -97,10 +97,12 @@ mylib = { path = "../mylib" }
 
 - `git` — repository (same forms as `repo` above).
 - `version` — constraint string.
-- `path` — local directory used directly as the checkout (no clone, no
-  copy). Takes precedence for local development; a path dep's `commit`
-  is read from its own git repo when present, else recorded as
-  `"local"`.
+- `path` — local directory. **Absolute paths and `./`-prefixed paths**
+  are used directly as the checkout (no clone, no copy; edits take
+  effect on the next build). `../`-prefixed paths are treated like git
+  repos: cloned into the cache and resolved to the best matching tag.
+  A path dep's `commit` is read from its own git repo when present,
+  else recorded as `"local"`.
 
 A path dependency's *value* key in the table form is `path`; in the
 shorthand form, a bare path also works

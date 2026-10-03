@@ -1879,8 +1879,8 @@ void Sema::checkBinary(EBinary *b) {
       b->type = tc.prim(PRIM_bool);
       return;
     }
-    diag.error(b->loc, strfmt("cannot apply '%s' to enum values ('%s' and '%s')%s",
-                              op.c_str(), typeToString(lt).c_str(), typeToString(rt).c_str()),
+    diag.error(b->loc, strfmt("cannot apply '%s' to enum values ('%s' and '%s')", op.c_str(),
+                              typeToString(lt).c_str(), typeToString(rt).c_str()),
                "enums with payloads: compare with match; payload-less enums support == and !=");
     b->type = tc.invalid();
     return;

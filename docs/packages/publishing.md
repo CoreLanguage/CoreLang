@@ -144,8 +144,14 @@ Work on a package and its consumer side by side:
                              #   coolmath = { path = "../coolmath" }
 ```
 
-- A `path` dependency is used **in place**: edits take effect on the
-  next `core build`, no reinstall, no copying.
+- A `path` dependency given as an **absolute path** (or a `./`-prefixed
+  path) is used **in place**: edits take effect on the next `core
+  build`, no reinstall, no copying (verified: adding a function to the
+  dependency and rebuilding picks it up).
+- A `../`-prefixed relative path goes through the normal git flow
+  instead: the repo is cloned into the cache and the best matching tag
+  is checked out (worktree) — tags are honored, but it is a snapshot,
+  not in-place.
 - `core install /abs/path/to/pkg` also records a path dependency (the
   manifest line keeps the path; the lockfile records the dep's current
   HEAD commit for reference).
