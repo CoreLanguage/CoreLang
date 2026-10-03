@@ -41,9 +41,9 @@ features that are not in this file as if they work.
   `never` return type: function must not return normally; calls to never
   functions make following code unreachable.
 - Control flow: if/else (conditions must be bool - no truthiness),
-  while, `for i in 0..n` (exclusive range), `for i in 0..=n` (inclusive),
-  `for x in array`, C-style `for i = 0; i < n; i += 1`, break, continue,
-  switch (case values: integers/chars/enums; no fallthrough),
+  while, loop (infinite), `for i in 0..n` (exclusive range), `for i in 0..=n`
+  (inclusive), `for x in array`, C-style `for i = 0; i < n; i += 1`,
+  break, continue, switch (case values: integers/chars/enums; no fallthrough),
   match (patterns: enum variants with payload binding `Some(v)`,
   literals, bindings, `_` wildcard; exhaustive for enums).
 - `unsafe { ... }` blocks: required for pointer-to-pointer casts with
@@ -74,8 +74,10 @@ features that are not in this file as if they work.
 
 ## User-defined types
 - struct: C-compatible layout (natural alignment), @packed attribute for
-  packed layout. Fields + methods (static dispatch). All fields required
-  in literals unless the type has an init constructor.
+  packed layout. Fields (optional default values) + methods (static
+  dispatch; pub/static modifiers on struct methods). All fields required in
+  literals unless the type has an init constructor or the missing fields
+  declare default values.
 - class: single inheritance `class Dog : Animal`, interfaces/traits after
   a comma. Fields + methods. Polymorphic classes (with virtual/abstract
   methods, or deriving from polymorphic ones) carry a vtable pointer at
@@ -120,7 +122,10 @@ features that are not in this file as if they work.
 
 ## Standard library (std/, auto-imported prelude + explicit modules)
 - prelude (auto): say overloads for every primitive, print, assert, panic,
-  c_str/str_from_c/str_eq/str_cmp, Option<T>, Result<T, E>.
+  c_str/str_from_c/str_eq/str_cmp, to_string overloads (int/uint/float/bool/
+  char -> string, allocates), Option<T>, Result<T, E>.
+- Implicit conversions added late: usize<->u64 and isize<->i64 (same width);
+  any ptr<T> -> ptr<void> (opaque widening) in call arguments.
 - memory: alloc<T>, alloc_zeroed<T>, alloc_array<T>, alloc_zeroed_array<T>,
   alloc_bytes, alloc_aligned, realloc_array, free, memcpy/memset/memcmp.
 - math: PI, E, sqrt, pow, sin, cos, abs, floor, ceil, min/max/clamp<T>.
