@@ -17,6 +17,19 @@ int Parser::binPrec(const std::string &op) {
   return 0;
 }
 
+// Consume one closing '>' for generic type/parameter lists; a '>>' token is
+// split in place (one '>' consumed, the other remains).
+bool Parser::eatGenericClose() {
+  if (atPunct(">")) { advance(); return true; }
+  if (atPunct(">>")) {
+    // the token array holds copies; mutate the current one in place
+    toks[i].text = ">";
+    toks[i].len = 1;
+    return true; // do not advance: the remaining '>' stays current
+  }
+  return false;
+}
+
 void Parser::skipNewlines() {
   while (at(Tok::Newline)) advance();
 }
@@ -131,7 +144,11 @@ TypeExpr *Parser::parseType() {
         if (eatPunct(",")) { skipNewlines(); continue; }
         break;
       }
-      if (!expectPunct(">", "closing generic type arguments")) return nullptr;
+      if (!eatGenericClose()) {
+        if (quiet_ == 0)
+          errorAt(loc(), "expected '>' closing generic type arguments", "", tk().len);
+        return nullptr;
+      }
     }
     return t;
   }
@@ -468,7 +485,7 @@ Expr *Parser::parsePrimary(bool noStructLit) {
         break;
       }
       quiet_--;
-      if (ok && eatPunct(">") &&
+      if (ok && eatGenericClose() &&
           ((atPunct("{") && !tk().newlineBefore) || atPunct(".") ||
            (atPunct("(") && !tk().newlineBefore))) {
         hasGenerics = true;
@@ -634,6 +651,19 @@ Stmt *Parser::parseStatement() {
     } else {
       i = save; // no else: restore the newline as the statement separator
     }
+    return s;
+  }
+  if (atKw("loop")) {
+    advance();
+    Stmt *body = parseBlock();
+    if (!body) return nullptr;
+    auto *s = ctx.make<SWhile>(l);
+    {
+    auto *b = ctx.make<EBool>(l);
+    b->value = true;
+    s->cond = b;
+  }
+    s->body = body;
     return s;
   }
   if (atKw("while")) {
@@ -939,7 +969,10 @@ DFunc *Parser::parseFuncRest(bool isPub, Decl *parent, unsigned mods, std::strin
       if (eatPunct(",")) continue;
       break;
     }
-    if (!expectPunct(">", "closing generic parameter list")) return nullptr;
+    if (!eatGenericClose()) {
+      errorAt(loc(), "expected '>' closing generic parameter list", "", tk().len);
+      return nullptr;
+    }
   }
   if (!expectPunct("(", "to start function parameters")) return nullptr;
   bool variadic = false;
@@ -980,7 +1013,7 @@ DStruct *Parser::parseStruct(bool isPub, bool packed) {
       if (eatPunct(",")) continue;
       break;
     }
-    if (!expectPunct(">", "closing generic parameter list")) return nullptr;
+    if (!eatGenericClose()) return nullptr;
   }
   skipNewlines();
   if (!expectPunct("{", "to start struct body")) return nullptr;
@@ -1041,7 +1074,7 @@ DClass *Parser::parseClass(bool isPub, bool packed) {
       if (eatPunct(",")) continue;
       break;
     }
-    if (!expectPunct(">", "closing generic parameter list")) return nullptr;
+    if (!eatGenericClose()) return nullptr;
   }
   if (eatPunct(":")) {
     TypeExpr *first = parseType();
@@ -1117,7 +1150,7 @@ DInterface *Parser::parseInterface(bool isPub, bool isTrait) {
       if (eatPunct(",")) continue;
       break;
     }
-    if (!expectPunct(">", "closing generic parameter list")) return nullptr;
+    if (!eatGenericClose()) return nullptr;
   }
   skipNewlines();
   if (!expectPunct("{", "to start interface body")) return nullptr;
@@ -1156,7 +1189,7 @@ DEnum *Parser::parseEnum(bool isPub) {
       if (eatPunct(",")) continue;
       break;
     }
-    if (!expectPunct(">", "closing generic parameter list")) return nullptr;
+    if (!eatGenericClose()) return nullptr;
   }
   skipNewlines();
   if (!expectPunct("{", "to start enum body")) return nullptr;

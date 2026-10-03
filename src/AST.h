@@ -383,6 +383,7 @@ struct DGlobal : Decl {
   TypeExpr *type = nullptr;
   Expr *init = nullptr; // may be null => zero init
   bool isMut = false, isTLS = false, isPub = false;
+  void *semaType = nullptr; // inferred type for the typeless `g = init` form
   DGlobal(SourceLoc l) : Decl(Global, l) {}
 };
 struct DConst : Decl {

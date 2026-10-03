@@ -81,6 +81,7 @@ private:
   Expr *parsePrimary(bool noStructLit = false);
   Pattern *parsePattern();
   TypeExpr *parseType();
+  bool eatGenericClose(); // consumes '>' (splits '>>' like C++11)
   std::vector<Param> parseParamList(bool &isVariadic);
 
 public:

@@ -113,6 +113,7 @@ public:
   ModuleSema *entryModule = nullptr;
 
   // type resolution
+  Type *globalTypeOf(DGlobal *g); // declared type, or the type inferred from the initializer
   Type *resolveType(TypeExpr *te);
   Type *resolveNamedType(TypeExpr *te);
 

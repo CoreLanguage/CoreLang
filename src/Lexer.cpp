@@ -10,7 +10,7 @@ const char *const keywordTable[] = {
     "tls",
     // control flow
     "if", "else", "while", "for", "in", "break", "continue", "return", "switch",
-    "case", "default", "match",
+    "case", "default", "match", "loop",
     // misc
     "as", "unsafe", "true", "false", "null", "self", "super", "and", "or",
     "sizeof", "alignof",

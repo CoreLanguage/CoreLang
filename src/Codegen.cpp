@@ -262,7 +262,7 @@ llvm::GlobalVariable *Codegen::globalFor(DGlobal *g) {
   std::string modName = curModule ? curModule->name : "";
   mangled += std::to_string(modName.size()) + modName + std::to_string(g->name.size()) + g->name;
   if (auto *gv = mod->getGlobalVariable(mangled)) return gv;
-  Type *t = sema.resolveType(g->type);
+  Type *t = g->type ? sema.resolveType(g->type) : (Type *)g->semaType;
   llvm::Type *lt = t ? llvmType(t) : builder.getInt32Ty();
   llvm::Constant *init = Constant::getNullValue(lt);
   if (g->init) {

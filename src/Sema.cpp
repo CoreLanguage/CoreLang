@@ -145,6 +145,11 @@ bool Sema::visible(Decl *d, ModuleSema *from) {
   return isPub;
 }
 
+Type *Sema::globalTypeOf(DGlobal *g) {
+  if (g->type) return resolveType(g->type);
+  return (Type *)g->semaType;
+}
+
 Decl *Sema::lookupTypeOwn(const std::string &name) {
   if (!curModule) return nullptr;
   auto it = curModule->types.find(name);
@@ -823,7 +828,10 @@ bool Sema::checkAll() {
       } else if (d->kind == Decl::Global) {
         auto *g = (DGlobal *)d;
         if (g->type) resolveType(g->type);
-        if (g->init) checkExpr(g->init);
+        if (g->init) {
+          checkExpr(g->init);
+          if (!g->type && g->init->type) g->semaType = g->init->type;
+        }
       } else if (d->kind == Decl::Const) {
         auto *c = (DConst *)d;
         if (c->type) resolveType(c->type);
@@ -1026,7 +1034,7 @@ void Sema::checkStmt(Stmt *s) {
       auto git = curModule->globals.find(l->name);
       if (git != curModule->globals.end()) {
         DGlobal *g = git->second;
-        Type *gt = resolveType(g->type);
+        Type *gt = globalTypeOf(g);
         if (!g->isMut) {
           diag.error(l->loc, strfmt("cannot assign to immutable global '%s'", l->name.c_str()),
                      "declare it with `mut " + l->name + ": " + typeToString(gt) + "`", 1);
@@ -1320,7 +1328,7 @@ void Sema::checkExpr(Expr *e, bool lvalue) {
     if (git != curModule->globals.end()) {
       id->idKind = IdKind::Global;
       id->target = git->second;
-      e->type = resolveType(git->second->type);
+      e->type = globalTypeOf(git->second);
       return;
     }
     auto cit = curModule->consts.find(name);
@@ -1983,7 +1991,7 @@ void Sema::checkAssign(EAssign *a) {
       auto *g = (DGlobal *)id->target;
       if (!g->isMut) {
         diag.error(a->loc, strfmt("cannot assign to immutable global '%s'", g->name.c_str()),
-                   "declare it with `mut " + g->name + ": " + typeToString(resolveType(g->type)) + "`", 1);
+                   "declare it with `mut " + g->name + ": " + typeToString(globalTypeOf(g)) + "`", 1);
         return;
       }
     } else {
