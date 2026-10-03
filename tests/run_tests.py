@@ -575,8 +575,9 @@ def test_codegen_internals(w):
     check("emit-asm prints assembly", r.returncode == 0 and "mov" in r.stdout, r.stderr[:200])
     # object file emission (real machine code)
     r = run([CORE, "compile", "objout", os.path.join(w, "ir.cr"), "--emit-object"], cwd=w)
-    check("object file emitted", r.returncode == 0 and os.path.exists(os.path.join(w, "objout.coreobj.o")), r.stderr)
-    with open(os.path.join(w, "objout.coreobj.o"), "rb") as f:
+    check("object file emitted (--emit-object writes objout.o)",
+          r.returncode == 0 and os.path.exists(os.path.join(w, "objout.o")), r.stderr)
+    with open(os.path.join(w, "objout.o"), "rb") as f:
         magic = f.read(4)
     check("object file is real ELF machine code", magic == b"\x7fELF", magic)
     # debug info

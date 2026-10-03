@@ -178,6 +178,8 @@ static bool outputExists(const std::string &outputName) {
 int runPipelineInternal(Driver &driver, const std::string &outputName, const std::string &entryPath,
                         PipelineMode mode) {
   DriverOptions &opts = driver.opts;
+  if (opts.emitObjectOnly && mode == PipelineMode::EmitBinary)
+    mode = PipelineMode::EmitObject; // --emit-object: stop after code generation
   Diagnostics &diag = driver.diag;
   SourceMgr &sm = driver.sm;
 
@@ -311,11 +313,12 @@ int runPipelineInternal(Driver &driver, const std::string &outputName, const std
     return 0;
   }
 
-  // emit object file
+  // emit object file: linked builds use a temporary name (removed after a
+  // successful link); explicit --emit-object writes <output>.o
   std::string objFile;
   bool linkAfter = mode == PipelineMode::EmitBinary;
   if (linkAfter) objFile = outputName + ".coreobj.o";
-  else objFile = outputName;
+  else objFile = outputName.find(".o") == std::string::npos ? outputName + ".o" : outputName;
   {
     int fd;
     if (sys::fs::openFileForWrite(objFile, fd, sys::fs::CD_CreateAlways)) {
@@ -375,12 +378,16 @@ int Driver::linkObject(const std::string &objPath, const std::string &outputName
   int rc = system(cmd.c_str());
   if (rc != 0) {
     diag.plainError(strfmt("linking failed (exit code %d)\n  command: %s", rc, cmd.c_str()));
+    // keep the object file around to help debugging the link failure
     return 1;
   }
 #ifndef _WIN32
   std::string chmod = "chmod +x " + outputName;
   system(chmod.c_str());
 #endif
+  // the intermediate object file is no longer needed once linking succeeded
+  std::string rm = "rm -f " + objPath;
+  system(rm.c_str());
   fprintf(stderr, "built: %s\n", outputName.c_str());
   return 0;
 }
