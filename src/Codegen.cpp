@@ -1352,12 +1352,7 @@ llvm::Value *Codegen::emitCall(ECall *c) {
       if (!f->genericParams.empty() && c->genInstance) {
         GenericInstance *gi = (GenericInstance *)c->genInstance;
         llvm::Function *impl = declareFunc(gi->clonedFunc, gi->args);
-        std::vector<llvm::Value *> args;
-        for (size_t ai = 0; ai < gi->clonedFunc->params.size(); ai++) {
-          if (ai < c->args.size()) args.push_back(emitExpr(c->args[ai]));
-          else if (gi->clonedFunc->params[ai].defVal)
-            args.push_back(emitExpr(gi->clonedFunc->params[ai].defVal));
-        }
+        std::vector<llvm::Value *> args = emitGenericArgs(gi, c);
         return ccall(impl, args, "call");
       }
       llvm::Function *impl = declareFunc(f, {});
@@ -1373,8 +1368,7 @@ llvm::Value *Codegen::emitCall(ECall *c) {
     if (c->genInstance) {
       GenericInstance *gi = (GenericInstance *)c->genInstance;
       llvm::Function *impl = declareFunc(gi->clonedFunc, gi->args);
-      std::vector<llvm::Value *> args;
-      for (auto *a : c->args) args.push_back(emitExpr(a));
+      std::vector<llvm::Value *> args = emitGenericArgs(gi, c);
       return ccall(impl, args, "call");
     }
     if (id->idKind == IdKind::Local) {
@@ -1433,6 +1427,29 @@ llvm::Value *Codegen::coerceValue(llvm::Value *v, Type *want, Type *got) {
     return v;
   }
   return v;
+}
+
+std::vector<llvm::Value *> Codegen::emitGenericArgs(GenericInstance *gi, ECall *c) {
+  DFunc *tmpl = gi->tmpl;
+  // resolve template parameter types under the instance's substitution
+  std::map<std::string, Type *> sub;
+  for (size_t gi2 = 0; gi2 < tmpl->genericParams.size() && gi2 < gi->args.size(); gi2++)
+    sub[tmpl->genericParams[gi2]] = gi->args[gi2];
+  auto *saved = sema.subst;
+  sema.subst = &sub;
+  std::vector<llvm::Value *> args;
+  for (size_t ai = 0; ai < tmpl->params.size(); ai++) {
+    Type *want = sema.resolveType(tmpl->params[ai].type);
+    if (ai < c->args.size()) {
+      llvm::Value *v = emitExpr(c->args[ai]);
+      args.push_back(coerceValue(v, want, c->args[ai]->type));
+    } else if (tmpl->params[ai].defVal) {
+      args.push_back(coerceValue(emitExpr(tmpl->params[ai].defVal), want,
+                                 tmpl->params[ai].defVal->type));
+    }
+  }
+  sema.subst = saved;
+  return args;
 }
 
 std::vector<llvm::Value *> Codegen::emitCallArgs(DFunc *f, ECall *c) {
