@@ -393,12 +393,26 @@ static bool setupProjectDriver(DriverOptions &opts, Manifest &m, Diagnostics &di
   }
   if (!loadManifest(manifestPath(), m, diag)) return false;
   opts.projectRoot = ".";
-  // resolve dependencies (already installed packages)
+  // resolve dependencies: the LOCKFILE pins exact versions/commits and is
+  // respected by every build; only missing entries resolve fresh
   std::vector<LockEntry> lock;
   loadLockfile(lockfilePath(), lock);
   for (auto &dep : m.dependencies) {
     std::string checkout, version, commit;
     std::string spec = dep.repo + (dep.version.empty() ? "" : "@" + dep.version);
+    // lockfile entry? use the pinned version exactly
+    std::string lockedVersion, lockedCommit;
+    for (auto &l : lock) {
+      if (l.name == dep.name) {
+        lockedVersion = l.version;
+        lockedCommit = l.commit;
+      }
+    }
+    if (!lockedVersion.empty() && dep.version.empty()) {
+      spec = dep.repo + "@" + lockedVersion; // exact pin
+    } else if (!lockedVersion.empty() && !lockedCommit.empty()) {
+      spec = dep.repo + "@" + lockedVersion; // constraint still satisfied by pin
+    }
     if (!fetchPackage(spec, checkout, version, commit, diag)) return false;
     opts.packageSrcDirs.push_back(checkout);
     // dependency's own dependencies
