@@ -296,7 +296,7 @@ std::vector<Token> Lexer::tokenizeAll() {
     }
 
     // punctuators, longest match first (3, 2, 1 chars)
-    static const char *punct3[] = {"<<=", ">>=", nullptr};
+    static const char *punct3[] = {"<<=", ">>=", "...", nullptr};
     static const char *punct2[] = {"==", "!=", "<=", ">=", "&&", "||", "<<", ">>",
                                    "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=",
                                    "..", "->", nullptr};

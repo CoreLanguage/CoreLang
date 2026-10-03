@@ -1380,11 +1380,28 @@ llvm::Value *Codegen::emitCall(ECall *c) {
   return Constant::getNullValue(builder.getInt32Ty());
 }
 
+llvm::Value *Codegen::coerceValue(llvm::Value *v, Type *want, Type *got) {
+  if (!want || !got) return v;
+  if (want->isString() && got->isString()) return v;
+  // string -> ptr<char>: pass the data pointer
+  if (got->isString() && want->isPtr() && want->pointee->isPrim() &&
+      want->pointee->prim == PRIM_char) {
+    return builder.CreateExtractValue(v, {0});
+  }
+  // f32 -> f64 for C varargs
+  if (got->isFloat() && got->prim == PRIM_f32 && want->isFloat() && want->prim == PRIM_f64)
+    return builder.CreateFPExt(v, builder.getDoubleTy());
+  if (got->isBool() && want->isInt()) return builder.CreateZExt(v, llvmType(want));
+  return v;
+}
+
 std::vector<llvm::Value *> Codegen::emitCallArgs(DFunc *f, ECall *c) {
   std::vector<llvm::Value *> args;
   for (size_t ai = 0; ai < f->params.size(); ai++) {
     if (ai < c->args.size()) {
-      args.push_back(emitExpr(c->args[ai]));
+      llvm::Value *v = emitExpr(c->args[ai]);
+      Type *want = sema.resolveType(f->params[ai].type);
+      args.push_back(coerceValue(v, want, c->args[ai]->type));
     } else if (f->params[ai].defVal) {
       args.push_back(emitExpr(f->params[ai].defVal));
     }
@@ -1613,19 +1630,19 @@ llvm::Value *Codegen::emitBuiltinCall(ECall *c, Builtin b, const std::string &na
     return builder.CreateCall(ia, vals);
   }
   case Builtin::Splat: {
-    // splat_<prim>(scalar): scalar type already checked; result is the vector
-    std::string prim = name.substr(6);
-    int pk = primKindByName(prim);
-    Type *vecTy = tc.prim(pk < 10 ? pk : pk);
-    // determine vector from name: e.g. f32x4
-    llvm::Type *lt = llvmType(tc.prim(pk));
+    std::string vec = name.substr(6); // e.g. "f32x4"
+    int vk = primKindByName(vec);
+    llvm::Type *lt = llvmType(tc.prim(vk));
     llvm::Value *scalar = emitExpr(args[0]);
-    // widen/narrow scalar to element type if needed
     llvm::VectorType *vt = dyn_cast<llvm::VectorType>(lt);
     if (!vt) return scalar;
     llvm::Value *elem = scalar;
-    if (elem->getType() != vt->getElementType())
-      elem = builder.CreateBitOrPointerCast(elem, vt->getElementType());
+    if (elem->getType() != vt->getElementType()) {
+      if (elem->getType()->isIntegerTy() && vt->getElementType()->isIntegerTy())
+        elem = builder.CreateIntCast(elem, vt->getElementType(), false);
+      else if (elem->getType()->isIntegerTy())
+        elem = builder.CreateSIToFP(elem, vt->getElementType());
+    }
     return builder.CreateVectorSplat(vt->getElementCount(), elem);
   }
   case Builtin::SimdExtract: {

@@ -870,15 +870,13 @@ std::vector<Param> Parser::parseParamList(bool &isVariadic) {
   skipNewlines();
   if (atPunct(")")) return params;
   while (true) {
-    if (eatPunct(".")) { // variadic "..." was lexed as three '.'
-      // actually '...' isn't a single token; handled below via '...' detection
+    // variadic marker: '...' (single token)
+    if (atPunct("...")) {
+      advance();
+      isVariadic = true;
+      return params;
     }
-    // variadic marker: '.' '.' '.' lexed as three Punct "." tokens
     if (atPunct(".")) {
-      // count dots
-      int dots = 0;
-      while (atPunct(".") && dots < 3) { advance(); dots++; }
-      if (dots == 3) { isVariadic = true; return params; }
       errorAt(loc(), "unexpected '.'", "", 1);
       return params;
     }

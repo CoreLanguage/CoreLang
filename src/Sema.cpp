@@ -678,6 +678,10 @@ bool Sema::typesAssignable(Type *dst, Type *src, Expr *srcExpr, SourceLoc loc,
     al->type = dst;
     return true;
   }
+  // FFI: string -> ptr<char> (the string view's data pointer)
+  if (src->isString() && dst->isPtr() && dst->pointee->isPrim() &&
+      dst->pointee->prim == PRIM_char)
+    return true;
   // array -> same handled by same(); no decay
 
   diag.error(loc, strfmt("cannot assign %s '%s' to '%s'", what.c_str(), typeToString(src).c_str(),
@@ -2770,14 +2774,17 @@ Type *Sema::checkBuiltinCall(ECall *call, Builtin b, const std::string &name) {
     return tc.prim(PRIM_u64);
   }
   case Builtin::Splat: {
-    // splat_<primname>(scalar) -> vector
-    std::string prim = name.substr(6); // after "splat_"
-    int pk = primKindByName(prim);
-    if (pk < 0 || args.size() != 1 || !args[0]->type || args[0]->type->prim != pk) {
-      diag.error(call->loc, strfmt("splat_%s expects one '%s' argument", prim.c_str(), prim.c_str()));
+    // splat_<vectorname>(scalar) -> vector; scalar must be the element type
+    std::string vec = name.substr(6); // e.g. "f32x4"
+    int vk = primKindByName(vec);
+    std::string elemName = vec.substr(0, vec.find('x'));
+    int ek = primKindByName(elemName);
+    if (vk < 0 || ek < 0 || args.size() != 1 || !args[0]->type ||
+        args[0]->type->prim != ek) {
+      diag.error(call->loc, strfmt("splat_%s expects one '%s' argument", vec.c_str(), elemName.c_str()));
       return nullptr;
     }
-    return tc.prim(pk < 10 ? pk + 10 : pk); // f32(15) -> f32x4(19)? corrected below
+    return tc.prim(vk);
   }
   case Builtin::SimdExtract: {
     std::string prim = name.substr(13); // after "simd_extract_"
@@ -3086,6 +3093,12 @@ DFunc *Sema::resolveOverload(const std::vector<DFunc *> &cands, const std::vecto
         for (auto &[iff, _] : sl->interfaces)
           if (iff == (DInterface *)want->ifaceDecl) impl = true;
         if (impl) { score = std::min(score, 1); continue; }
+      }
+      // FFI: string -> ptr<char>
+      if (got->isString() && want->isPtr() && want->pointee->isPrim() &&
+          want->pointee->prim == PRIM_char) {
+        score = std::min(score, 1);
+        continue;
       }
       // ptr<Derived> -> ptr<Base>
       if (got->isPtr() && want->isPtr() && got->pointee->isClass() && want->pointee->isClass()) {

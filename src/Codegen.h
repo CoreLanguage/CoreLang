@@ -86,6 +86,7 @@ private:
   llvm::CallInst *ccall(llvm::FunctionType *fty, llvm::Value *callee,
                         llvm::ArrayRef<llvm::Value *> args, const std::string &name);
   std::vector<llvm::Value *> emitCallArgs(DFunc *f, ECall *c);
+  llvm::Value *coerceValue(llvm::Value *v, Type *want, Type *got);
 
   // ---- expressions ----
   llvm::Value *emitExpr(Expr *e);                 // rvalue
