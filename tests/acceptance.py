@@ -105,7 +105,7 @@ func main() {
         r = sh([CORE, "emit-ir", os.path.join(w, "ir.cr")], cwd=w)
         ok("12. LLVM IR is genuinely generated", "define i32 @main()" in r.stdout)
         r = sh([CORE, "compile", "objtest", os.path.join(w, "ir.cr"), "--emit-object"], cwd=w)
-        elf = os.path.exists(os.path.join(w, "objtest.coreobj.o"))
+        elf = os.path.exists(os.path.join(w, "objtest.o"))
         ok("13. native machine code is genuinely generated", r.returncode == 0 and elf, r.stderr)
         r = sh([CORE, "compile", "finalapp", os.path.join(w, "ir.cr")], cwd=w)
         ok("14. object files are linked into one final executable", r.returncode == 0, r.stderr)
