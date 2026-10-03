@@ -11,6 +11,7 @@
 
 namespace core {
 
+struct Type;      // defined in Type.h (interned types)
 struct Expr;
 struct Stmt;
 struct Decl;
@@ -38,9 +39,31 @@ struct Pattern {
   std::vector<Pattern *> subs;   // Variant payload bindings
   Expr *litExpr = nullptr;       // Lit
   SourceLoc loc;
+  // sema annotations
+  void *enumDecl = nullptr;      // DEnum* for Variant
+  int variantTag = -1;
+  Type *bindType = nullptr;      // type bound by Var
+  std::vector<Type *> payloadTypes; // resolved payload types for Variant
 };
 
 // --------------------------------------------------------------- expressions --
+struct Expr;
+struct Stmt;
+
+// Sema resolution annotations (filled during type checking).
+enum class IdKind {
+  Unresolved, Local, Global, ConstVal, Func, EnumConst, Module, TypeRef, Builtin,
+};
+enum class MemberKind {
+  Unresolved, Field, Method, StaticMethod, ModuleMember, IfaceMethod, VariantOf,
+};
+enum class CastKind { None, Identity, IntToInt, IntToFloat, FloatToInt, FloatToFloat,
+                       PtrToPtr, IntToPtr, PtrToInt, EnumToInt, IntToEnum, BoolToInt,
+                       IntToBool, ClassUp, ClassDown, IfaceWrap, IfaceUnwrap, ToNever };
+enum class BinKind { None, Arith, Cmp, StrConcat, StrCmp, PtrArith, PtrDiff, PtrCmp,
+                      ShortCircuit, Bitwise, Shift, EnumCmp, VecArith };
+enum class UnKind { None, Neg, Not, BitNot, Deref, Ref };
+
 struct Expr {
   enum Kind {
     IntLit, FloatLit, BoolLit, CharLit, StringLit, NullLit,
@@ -49,6 +72,23 @@ struct Expr {
   };
   Kind kind;
   SourceLoc loc;
+  Type *type = nullptr;           // resolved type (Type.h); set by Sema
+  // --- sema annotations ---
+  IdKind idKind = IdKind::Unresolved;
+  void *target = nullptr;         // DGlobal*/DConst*/DFunc*/ModuleSema*/Decl*
+  int enumTag = -1;               // EnumConst: variant tag
+  int builtin = 0;                // Builtin enum
+  MemberKind memberKind = MemberKind::Unresolved;
+  int memberIndex = -1;           // field index / vtable-free method idx
+  void *viaModule = nullptr;      // ModuleSema* when member crosses modules
+  void *resolvedFunc = nullptr;   // DFunc* chosen overload
+  void *genInstance = nullptr;    // GenericInstance* for generic calls
+  int ifaceMethodIndex = -1;
+  int castKind = 0;               // CastKind
+  int binKind = 0;                // BinKind
+  int unKind = 0;                 // UnKind
+  bool checkBounds = true;        // EIndex bounds check
+  void *scopeId = nullptr;        // Scope* where an EIdent local resolved
   explicit Expr(Kind k, SourceLoc l) : kind(k), loc(l) {}
   virtual ~Expr() = default;
 };
@@ -136,6 +176,10 @@ struct ELambda : Expr {
   TypeExpr *retType = nullptr;
   Stmt *body = nullptr;
   ELambda(SourceLoc l) : Expr(Lambda, l) {}
+  // sema: captured outer locals (by value)
+  struct Capture { std::string name; Type *type = nullptr; void *scopeId = nullptr; };
+  std::vector<Capture> captures;
+  Type *closureType = nullptr;
 };
 struct MatchArm {
   Pattern *pattern = nullptr;
@@ -185,6 +229,9 @@ struct SLet : Stmt {
   TypeExpr *type = nullptr; // may be null (inferred)
   Expr *init = nullptr;
   SLet(SourceLoc l) : Stmt(KLet, l) {}
+  Type *resolvedType = nullptr;    // declared/assigned type (sema)
+  bool isAssignExisting = false;   // `x = e` resolved as assignment to existing var
+  void *assignGlobal = nullptr;    // DGlobal* when assigning a global
 };
 struct SReturn : Stmt {
   Expr *e = nullptr;
@@ -273,6 +320,7 @@ struct DFunc : Decl {
   bool isPub = false, isExtern = false, isStatic = false, isVirtual = false,
        isOverride = false, isAbstract = false, isUnsafe = false, isVariadic = false;
   std::string linkName;     // @link_name
+  bool checked = false;             // sema already checked this body
   Decl *parent = nullptr;   // enclosing struct/class/enum when method
   // Sema-resolved: interface default methods etc.
   DFunc(SourceLoc l) : Decl(Func, l) {}
