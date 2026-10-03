@@ -626,10 +626,10 @@ func halt() -> never {
 }
 ''')
     r = run([CORE, "compile", "kernel.elf", "kernel.cr", "--freestanding", "--emit-object"], cwd=w)
-    check("freestanding compilation", r.returncode == 0, r.stdout + r.stderr)
-    nm = run(["nm", os.path.join(w, "kernel.elf")], cwd=w)
+    check("freestanding compilation", r.returncode == 0 and os.path.exists(os.path.join(w, "kernel.elf.o")), r.stdout + r.stderr)
+    nm = run(["nm", os.path.join(w, "kernel.elf.o")], cwd=w)
     check("custom entry symbol _start present", "_start" in nm.stdout, nm.stdout + nm.stderr)
-    objdump = run(["objdump", "-d", os.path.join(w, "kernel.elf")], cwd=w)
+    objdump = run(["objdump", "-d", os.path.join(w, "kernel.elf.o")], cwd=w)
     check("inline asm (cli) present in machine code", "cli" in objdump.stdout or "\tf4" in objdump.stdout,
           objdump.stdout[:300])
 
