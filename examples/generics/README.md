@@ -1,6 +1,6 @@
-# packages
+# generics
 
-Installing and importing a git-hosted package.
+Generic functions and types (compile-time monomorphization).
 
 Build and run:
 

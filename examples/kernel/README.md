@@ -1,6 +1,6 @@
-# packages
+# kernel
 
-Installing and importing a git-hosted package.
+A freestanding bare-metal kernel with a custom entry point.
 
 Build and run:
 

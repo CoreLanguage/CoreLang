@@ -1,6 +1,6 @@
-# packages
+# fibonacci
 
-Installing and importing a git-hosted package.
+Recursion, iteration, and memoization side by side.
 
 Build and run:
 

@@ -1,6 +1,6 @@
-# packages
+# structs
 
-Installing and importing a git-hosted package.
+Struct literals, nesting, methods, predictable layout.
 
 Build and run:
 

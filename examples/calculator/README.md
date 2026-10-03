@@ -1,6 +1,6 @@
-# packages
+# calculator
 
-Installing and importing a git-hosted package.
+Functions and control flow in a tiny calculator.
 
 Build and run:
 

@@ -1,6 +1,6 @@
-# packages
+# atomics
 
-Installing and importing a git-hosted package.
+Lock-free counting with AtomicI32.
 
 Build and run:
 

@@ -1,6 +1,6 @@
-# packages
+# hello
 
-Installing and importing a git-hosted package.
+The minimal Core program.
 
 Build and run:
 

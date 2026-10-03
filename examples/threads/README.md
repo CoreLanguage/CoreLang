@@ -1,6 +1,6 @@
-# packages
+# threads
 
-Installing and importing a git-hosted package.
+OS threads with a mutex-protected shared account.
 
 Build and run:
 

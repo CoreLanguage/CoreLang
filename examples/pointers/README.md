@@ -1,6 +1,6 @@
-# packages
+# pointers
 
-Installing and importing a git-hosted package.
+Raw pointers: addresses, arithmetic, dereferencing, pointer-to-pointer.
 
 Build and run:
 

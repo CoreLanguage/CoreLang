@@ -1,6 +1,6 @@
-# packages
+# inline-asm
 
-Installing and importing a git-hosted package.
+Inline assembly via LLVM's asm integration (rdtsc, register ops).
 
 Build and run:
 

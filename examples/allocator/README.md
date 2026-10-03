@@ -1,6 +1,6 @@
-# packages
+# allocator
 
-Installing and importing a git-hosted package.
+A bump allocator: building custom allocators on raw memory.
 
 Build and run:
 

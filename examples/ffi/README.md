@@ -1,6 +1,6 @@
-# packages
+# ffi
 
-Installing and importing a git-hosted package.
+Calling C library functions through the C ABI (including varargs printf).
 
 Build and run:
 

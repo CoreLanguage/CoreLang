@@ -1,6 +1,6 @@
-# packages
+# manual-memory
 
-Installing and importing a git-hosted package.
+A growable buffer with explicit allocation and release.
 
 Build and run:
 

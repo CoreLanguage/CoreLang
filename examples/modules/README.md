@@ -1,6 +1,6 @@
-# packages
+# modules
 
-Installing and importing a git-hosted package.
+A multi-module project. Build: core compile geometry_demo src/main.cr
 
 Build and run:
 

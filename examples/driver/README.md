@@ -1,6 +1,6 @@
-# packages
+# driver
 
-Installing and importing a git-hosted package.
+MMIO-style device access with volatile operations and packed register layouts.
 
 Build and run:
 

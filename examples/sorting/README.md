@@ -1,6 +1,6 @@
-# packages
+# sorting
 
-Installing and importing a git-hosted package.
+Quicksort and binary search over fixed arrays.
 
 Build and run:
 

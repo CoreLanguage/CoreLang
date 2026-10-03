@@ -1,6 +1,6 @@
-# packages
+# oop
 
-Installing and importing a git-hosted package.
+Classes, single inheritance, virtual dispatch, interfaces, traits.
 
 Build and run:
 
