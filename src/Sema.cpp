@@ -1828,7 +1828,7 @@ void Sema::checkBinary(EBinary *b) {
     rt = b->rhs->type;
     bool bothInt = lt->isInt() && rt->isInt();
     bool bothFloat = lt->isFloat() && rt->isFloat();
-    if (!tc.same(lt, rt) && !(bothInt || bothFloat)) {
+    if (!tc.same(lt, rt)) {
       diag.error(b->loc, strfmt("cannot apply '%s' to '%s' and '%s'", op.c_str(),
                                 typeToString(lt).c_str(), typeToString(rt).c_str()),
                  "Core does not implicitly mix integer widths or float/integer: use `as` to cast", 1);

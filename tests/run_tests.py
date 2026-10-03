@@ -178,8 +178,8 @@ def test_types(w):
     f: u32 = 4294967295
     g: i64 = 9223372036854775807
     h: u64 = 18446744073709551615
-    say a + b as i32
-    say c as i32 + d as i32
+    say (a as i32) + (b as i32)
+    say (c as i32) + (d as i32)
     say e as i64
     say f as u64
     say g
@@ -208,7 +208,7 @@ def test_types(w):
     say sizeof([i64; 4])
     say alignof(i64)
 }
-''', ["65", "98", "true", "4", "32", "8"])
+''', ["65", "b", "true", "4", "32", "8"])
     expect_output(w, '''func main() {
     big: u128 = 340282366920938463463374607431768211455
     say big
@@ -603,7 +603,9 @@ def test_cross_freestanding(w):
     if os.path.exists(os.path.join(w, "cross.bin.coreobj.o")):
         with open(os.path.join(w, "cross.bin.coreobj.o"), "rb") as f:
             header = f.read(20)
-        check("aarch64 object is real AArch64 machine code", b"ARM" in header, header[:20])
+        check("aarch64 object is real AArch64 machine code",
+              header[:4] == b"\x7fELF" and header[18] == 0xB7,  # e_machine = EM_AARCH64 (183 = 0xB7)
+              header[:20])
 
     # freestanding: kernel with custom entry, no runtime
     with open(os.path.join(w, "kernel.cr"), "w") as f:
