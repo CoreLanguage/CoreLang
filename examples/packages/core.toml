@@ -1,0 +1,14 @@
+# Core project manifest - see docs/packages/manifest.md
+[package]
+name = "packages_demo"
+version = "0.1.0"
+core-version = ">=0.1.0"
+source-dir = "src"
+
+[build]
+# native libraries to link: link = ["m"]
+link = []
+
+[dependencies]
+coolmath = "/tmp/mockrepo/coolmath@"
+# example: coolmath = "github.com/snitch/coolmath@^1.2.0"
