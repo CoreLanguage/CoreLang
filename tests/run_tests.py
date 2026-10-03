@@ -679,6 +679,56 @@ def test_diagnostics(w):
                          "if condition must be bool")
     expect_compile_error(w, 'func main() {\n    x = 1\n    mut x = 2\n}\n',
                          "cannot assign to immutable")
+    # regressions (bugs found during doc verification)
+    expect_output(w, '''func main() {
+    c: char = 'b'
+    switch c {
+        case 'a': say "A"
+        case 'b': say "B!"
+        default: say "?"
+    }
+}
+''', ["B!"])
+    expect_output(w, '''class Utils {
+    pub static func n() -> i32 { return 5 }
+}
+
+func main() {
+    say Utils.n()
+}
+''', ["5"])
+    expect_output(w, '''enum SEnum { X, Y }
+
+func main() {
+    x = SEnum.X
+    y = SEnum.X
+    say x == y
+}
+''', ["true"])
+    expect_output(w, '''struct Cfg { name: string = "default", retries: i32 = 3 }
+
+func main() {
+    a = Cfg { }
+    say a.name
+    b = Cfg { name: "custom" }
+    say b.name
+    say b.retries
+}
+''', ["default", "custom", "3"])
+    expect_output(w, '''mut G: i32 = 5
+
+func main() {
+    G = 10
+    say G
+}
+''', ["10"])
+    expect_output(w, '''func main() {
+    d = -5000000000
+    say d
+    a: i8 = -128
+    say a
+}
+''', ["-5000000000", "-128"])
     expect_compile_error(w, 'func main() {\n    x = 1\n    x = 2\n}\n',
                          "cannot assign to immutable")
     expect_compile_error(w, 'func main() {\n    y = &5\n}\n',
