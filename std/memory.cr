@@ -66,10 +66,14 @@ pub func free<T>(p: ptr<T>) {
 }
 
 pub func memcpy<T>(dst: ptr<T>, src: ptr<T>, bytes: usize) {
-    core_rt_memcpy(dst as ptr<void>, src as ptr<void>, bytes)
+    unsafe {
+        core_rt_memcpy(dst as ptr<void>, src as ptr<void>, bytes)
+    }
 }
 pub func memset<T>(dst: ptr<T>, byte: u8, bytes: usize) {
-    core_rt_memset(dst as ptr<void>, byte as i32, bytes)
+    unsafe {
+        core_rt_memset(dst as ptr<void>, byte as i32, bytes)
+    }
 }
 pub func memcmp(a: ptr<void>, b: ptr<void>, bytes: usize) -> i32 {
     return core_rt_memcmp(a, b, bytes)

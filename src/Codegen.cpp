@@ -680,16 +680,9 @@ llvm::Value *Codegen::emitDefaultValue(Type *t) {
     return Constant::getNullValue(lt);
   }
   if (t->isEnum()) {
-    // variant 0
     unsigned off, total, align;
     llvm::Type *st = enumStorageType(t, &off, &total, &align);
-    if (auto *sty = dyn_cast<StructType>(st)) {
-      if (sty->getNumElements() == 1 && isa<ArrayType>(sty->getElementType(0))) {
-        auto *at = cast<ArrayType>(sty->getElementType(0));
-        return ConstantAggregateZero::get(at);
-      }
-    }
-    return ConstantInt::get(builder.getInt32Ty(), 0);
+    return Constant::getNullValue(st); // tag 0, payload zeroed
   }
   return Constant::getNullValue(lt);
 }
@@ -1081,14 +1074,15 @@ llvm::Value *Codegen::emitBinary(EBinary *b) {
     llvm::BasicBlock *endBB = llvm::BasicBlock::Create(ctx, isAnd ? "and.end" : "or.end", f);
     llvm::Value *l = emitExpr(b->lhs);
     llvm::BasicBlock *lhsEnd = builder.GetInsertBlock();
-    builder.CreateCondBr(l, rhsBB, endBB);
+    if (isAnd) builder.CreateCondBr(l, rhsBB, endBB);
+    else builder.CreateCondBr(l, endBB, rhsBB); // ||: lhs true short-circuits to true
     builder.SetInsertPoint(rhsBB);
     llvm::Value *r = emitExpr(b->rhs);
     llvm::BasicBlock *rhsEnd = builder.GetInsertBlock();
     builder.CreateBr(endBB);
     builder.SetInsertPoint(endBB);
     llvm::PHINode *phi = builder.CreatePHI(builder.getInt1Ty(), 2);
-    phi->addIncoming(isAnd ? ConstantInt::getFalse(ctx) : r, lhsEnd);
+    phi->addIncoming(isAnd ? ConstantInt::getFalse(ctx) : ConstantInt::getTrue(ctx), lhsEnd);
     phi->addIncoming(r, rhsEnd);
     return phi;
   }
@@ -1359,12 +1353,15 @@ llvm::Value *Codegen::emitCall(ECall *c) {
         GenericInstance *gi = (GenericInstance *)c->genInstance;
         llvm::Function *impl = declareFunc(gi->clonedFunc, gi->args);
         std::vector<llvm::Value *> args;
-        for (auto *a : c->args) args.push_back(emitExpr(a));
+        for (size_t ai = 0; ai < gi->clonedFunc->params.size(); ai++) {
+          if (ai < c->args.size()) args.push_back(emitExpr(c->args[ai]));
+          else if (gi->clonedFunc->params[ai].defVal)
+            args.push_back(emitExpr(gi->clonedFunc->params[ai].defVal));
+        }
         return ccall(impl, args, "call");
       }
       llvm::Function *impl = declareFunc(f, {});
-      std::vector<llvm::Value *> args;
-      for (auto *a : c->args) args.push_back(emitExpr(a));
+      std::vector<llvm::Value *> args = emitCallArgs(f, c);
       return ccall(impl, args, "call");
     }
   }
@@ -1407,6 +1404,10 @@ llvm::Value *Codegen::emitCall(ECall *c) {
 llvm::Value *Codegen::coerceValue(llvm::Value *v, Type *want, Type *got) {
   if (!want || !got) return v;
   if (want->isString() && got->isString()) return v;
+  // any ptr -> ptr<void>: opaque pointer (no bits change)
+  if (got->isPtr() && want->isPtr() && want->pointee->isPrim() &&
+      want->pointee->prim == PRIM_void)
+    return v;
   // string -> ptr<char>: pass the data pointer
   if (got->isString() && want->isPtr() && want->pointee->isPrim() &&
       want->pointee->prim == PRIM_char) {
@@ -1418,6 +1419,11 @@ llvm::Value *Codegen::coerceValue(llvm::Value *v, Type *want, Type *got) {
   if (got->isBool() && want->isInt()) return builder.CreateZExt(v, llvmType(want));
   // integer widening/narrowing for default-arg literals
   if (got->isInt() && want->isInt() && !tc.same(want, got)) {
+    // usize<->u64 / isize<->i64: identical representation
+    int a = got->prim, b = want->prim;
+    bool sameBits = (a == PRIM_usize && b == PRIM_u64) || (a == PRIM_u64 && b == PRIM_usize) ||
+                    (a == PRIM_isize && b == PRIM_i64) || (a == PRIM_i64 && b == PRIM_isize);
+    if (sameBits) return v;
     llvm::Type *lt = llvmType(want);
     unsigned sb = v->getType()->getIntegerBitWidth();
     unsigned db = lt->getIntegerBitWidth();
@@ -1849,6 +1855,32 @@ llvm::Value *Codegen::emitStructLit(EStructLit *sl) {
     llvm::Value *val = emitExpr(fexpr);
     builder.CreateStore(val, fptr);
     (void)ft;
+  }
+  // fields not listed in the literal: use their declared defaults
+  {
+    std::vector<Field> allFields;
+    if (td->kind == Decl::Struct) allFields = ((DStruct *)td)->fields;
+    else {
+      std::vector<DClass *> chain;
+      for (DClass *b = (DClass *)td; b;) {
+        chain.push_back(b);
+        ClassLayout *cl = sema.layoutOf(b);
+        b = cl ? cl->base : nullptr;
+      }
+      for (auto it2 = chain.rbegin(); it2 != chain.rend(); ++it2)
+        for (auto &f : (*it2)->fields) allFields.push_back(f);
+    }
+    for (auto &fld : allFields) {
+      bool provided = false;
+      for (auto &[pn, _] : sl->fields)
+        if (pn == fld.name) provided = true;
+      if (provided || !fld.defVal) continue;
+      int idx = sema.fieldIndexOf(ty, fld.name);
+      if (idx < 0) continue;
+      Type *ft = sema.fieldTypeOf(ty, fld.name);
+      llvm::Value *fptr = builder.CreateStructGEP(st, slot, idx);
+      builder.CreateStore(coerceValue(emitExpr(fld.defVal), ft, fld.defVal->type), fptr);
+    }
   }
   // classes/structs with constructors: run init after field initialization
   if (ty->isClass() || ty->isStruct()) {
@@ -2296,9 +2328,11 @@ void Codegen::emitStmt(Stmt *s) {
       bodies.push_back({llvm::BasicBlock::Create(ctx, "case", f), c.body});
     }
     llvm::BasicBlock *defBB = sw->defaultBody ? llvm::BasicBlock::Create(ctx, "default", f) : endBB;
+    // case values are i32; widen/truncate the scrutinee (char -> i32 etc.)
     llvm::Value *iv = scrut->getType()->isIntegerTy(1)
                           ? builder.CreateZExt(scrut, builder.getInt32Ty())
-                          : builder.CreateTrunc(scrut, builder.getInt32Ty());
+                          : builder.CreateIntCast(scrut, builder.getInt32Ty(),
+                                                  scrut->getType()->isIntegerTy(8));
     SwitchInst *si = builder.CreateSwitch(iv, defBB, (unsigned)sw->cases.size());
     for (size_t ci = 0; ci < sw->cases.size(); ci++) {
       for (Expr *v : sw->cases[ci].values) {

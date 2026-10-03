@@ -144,7 +144,8 @@ TypeExpr *Parser::parseType() {
 Pattern *Parser::parsePattern() {
   Pattern *p = ctx.makeNoLoc<Pattern>();
   p->loc = loc();
-  if (atPunct("_")) { advance(); p->kind = Pattern::Wild; return p; }
+  // `_` lexes as an identifier, so accept both forms
+  if (atPunct("_") || (atIdent() && tk().text == "_")) { advance(); p->kind = Pattern::Wild; return p; }
   if (atIdent()) {
     std::string name = advance().text;
     if (atPunct("(")) {
@@ -154,7 +155,7 @@ Pattern *Parser::parsePattern() {
       skipNewlines();
       if (!atPunct(")")) {
         while (true) {
-          if (atPunct("_")) { advance(); auto *w = ctx.makeNoLoc<Pattern>(); w->kind = Pattern::Wild; w->loc = prevLoc(); p->subs.push_back(w); }
+          if (atPunct("_") || (atIdent() && tk().text == "_")) { advance(); auto *w = ctx.makeNoLoc<Pattern>(); w->kind = Pattern::Wild; w->loc = prevLoc(); p->subs.push_back(w); }
           else if (atIdent()) { auto *v = ctx.makeNoLoc<Pattern>(); v->kind = Pattern::Var; v->loc = loc(); v->name = advance().text; p->subs.push_back(v); }
           else {
             errorAt(loc(), "expected identifier or '_' in variant pattern binding", "", tk().len);

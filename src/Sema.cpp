@@ -698,6 +698,16 @@ bool Sema::typesAssignable(Type *dst, Type *src, Expr *srcExpr, SourceLoc loc,
   if (src->isPtr() && src->pointee->isArray() && dst->isPtr() &&
       tc.same(src->pointee->elem, dst->pointee))
     return true;
+  // any pointer implicitly converts to ptr<void> (opaque, C-interop widening)
+  if (src->isPtr() && dst->isPtr() && dst->pointee->isPrim() && dst->pointee->prim == PRIM_void)
+    return true;
+  // same-width pointer-size integers are interchangeable
+  if (src->isInt() && dst->isInt()) {
+    int a = src->prim, b = dst->prim;
+    bool pair = (a == PRIM_usize && b == PRIM_u64) || (a == PRIM_u64 && b == PRIM_usize) ||
+                (a == PRIM_isize && b == PRIM_i64) || (a == PRIM_i64 && b == PRIM_isize);
+    if (pair) return true;
+  }
   // FFI: string -> ptr<char> (the string view's data pointer)
   if (src->isString() && dst->isPtr() && dst->pointee->isPrim() &&
       dst->pointee->prim == PRIM_char)
@@ -1534,9 +1544,46 @@ void Sema::checkExpr(Expr *e, bool lvalue) {
       if (mth->name == "init" && !mth->isStatic) hasCtor = true;
     bool isClassLit = ty->isClass() || hasCtor;
     if (!isClassLit && sl->fields.size() != fieldList.size()) {
-      diag.error(e->loc, strfmt("'%s' literal requires all %zu fields, got %zu",
-                                typeToString(ty).c_str(), fieldList.size(), sl->fields.size()));
-      return;
+      // missing fields are allowed when they declare default values
+      size_t defaultCount = 0;
+      for (auto &[fname2, fte2] : fieldList) {
+        bool provided = false;
+        for (auto &[pn, _] : sl->fields)
+          if (pn == fname2) provided = true;
+        if (!provided) defaultCount++; // counts missing; each must have a default
+      }
+      (void)defaultCount;
+      // verify below per-field; sizes may differ for defaulted literals
+      bool allMissingHaveDefaults = true;
+      for (auto &[fname2, fte2] : fieldList) {
+        bool provided = false;
+        for (auto &[pn, _] : sl->fields)
+          if (pn == fname2) provided = true;
+        (void)fte2;
+        if (!provided) {
+          // check the DECLARED default exists (pre-computed by the caller via
+          // the DStruct/DClass field list)
+          bool hasDefault = false;
+          if (td->kind == Decl::Struct) {
+            for (auto &f : ((DStruct *)td)->fields)
+              if (f.name == fname2 && f.defVal) hasDefault = true;
+          } else {
+            for (DClass *b = (DClass *)td; b && !hasDefault;) {
+              for (auto &f : b->fields)
+                if (f.name == fname2 && f.defVal) hasDefault = true;
+              ClassLayout *bl = layoutOf(b);
+              b = bl ? bl->base : nullptr;
+            }
+          }
+          if (!hasDefault) allMissingHaveDefaults = false;
+        }
+      }
+      if (!allMissingHaveDefaults) {
+        diag.error(e->loc, strfmt("'%s' literal requires all %zu fields, got %zu",
+                                  typeToString(ty).c_str(), fieldList.size(), sl->fields.size()),
+                   "missing fields need default values in the struct definition", 1);
+        return;
+      }
     }
     std::set<std::string> seen;
     for (auto &[fname, fexpr] : sl->fields) {
@@ -1805,16 +1852,28 @@ void Sema::checkBinary(EBinary *b) {
     return;
   }
 
-  // enums: equality only
+  // enums: equality only (payload-less enums; tagged unions compare via match)
   if (lt->isEnum() || rt->isEnum()) {
-    if (lt->isEnum() && rt->isEnum() && lt->decl == rt->decl && (op == "==" || op == "!=")) {
+    bool payloadFree = true;
+    if (lt->isEnum()) {
+      DEnum *en = (DEnum *)lt->decl;
+      for (auto &v : en->variants)
+        if (!v.payloadTypes.empty()) payloadFree = false;
+    }
+    if (rt->isEnum()) {
+      DEnum *en = (DEnum *)rt->decl;
+      for (auto &v : en->variants)
+        if (!v.payloadTypes.empty()) payloadFree = false;
+    }
+    if (lt->isEnum() && rt->isEnum() && lt->decl == rt->decl && payloadFree &&
+        (op == "==" || op == "!=")) {
       b->binKind = (int)BinKind::EnumCmp;
       b->type = tc.prim(PRIM_bool);
       return;
     }
-    diag.error(b->loc, strfmt("cannot apply '%s' to enum values ('%s' and '%s'); cast to an integer "
-                              "for bitwise/numeric operations", op.c_str(), typeToString(lt).c_str(),
-                              typeToString(rt).c_str()));
+    diag.error(b->loc, strfmt("cannot apply '%s' to enum values ('%s' and '%s')%s",
+                              op.c_str(), typeToString(lt).c_str(), typeToString(rt).c_str()),
+               "enums with payloads: compare with match; payload-less enums support == and !=");
     b->type = tc.invalid();
     return;
   }
@@ -2435,7 +2494,10 @@ Type *Sema::checkCall(ECall *call) {
                                           : std::vector<DFunc *>(((DStruct *)td)->methods);
           // static methods...
           for (DFunc *f : mths)
-            if (f->name == m->name && f->isStatic) candidates.push_back(f);
+            if (f->name == m->name && f->isStatic) {
+              candidates.push_back(f);
+              m->memberKind = MemberKind::StaticMethod;
+            }
           // ...or base-class method calls with implicit self (super-style)
           if (candidates.empty() && td->kind == Decl::Class && curFunc && curFunc->parent) {
             Decl *myType = curFunc->parent;
@@ -3217,6 +3279,19 @@ DFunc *Sema::resolveOverload(const std::vector<DFunc *> &cands, const std::vecto
           tc.same(got->pointee->elem, want->pointee)) {
         score = std::min(score, 1);
         continue;
+      }
+      // any pointer -> ptr<void> (opaque)
+      if (got->isPtr() && want->isPtr() && want->pointee->isPrim() &&
+          want->pointee->prim == PRIM_void) {
+        score = std::min(score, 1);
+        continue;
+      }
+      // same-width pointer-size integers are interchangeable
+      if (got->isInt() && want->isInt()) {
+        int a = got->prim, b = want->prim;
+        bool pair = (a == PRIM_usize && b == PRIM_u64) || (a == PRIM_u64 && b == PRIM_usize) ||
+                    (a == PRIM_isize && b == PRIM_i64) || (a == PRIM_i64 && b == PRIM_isize);
+        if (pair) { score = std::min(score, 1); continue; }
       }
       // FFI: string -> ptr<char>
       if (got->isString() && want->isPtr() && want->pointee->isPrim() &&

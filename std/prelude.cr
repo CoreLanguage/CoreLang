@@ -86,6 +86,29 @@ pub func assert(cond: bool, msg: string) {
     }
 }
 
+// --- to_string: text conversion (allocates a new string) ---
+extern func core_rt_i64_to_string(v: i64) -> string
+extern func core_rt_u64_to_string(v: u64) -> string
+extern func core_rt_f64_to_string(v: f64) -> string
+extern func core_rt_f32_to_string(v: f32) -> string
+extern func core_rt_bool_to_string(b: bool) -> string
+extern func core_rt_char_to_string(c: char) -> string
+
+pub func to_string(v: i32) -> string { return core_rt_i64_to_string(v as i64) }
+pub func to_string(v: i64) -> string { return core_rt_i64_to_string(v) }
+pub func to_string(v: i8) -> string { return core_rt_i64_to_string(v as i64) }
+pub func to_string(v: i16) -> string { return core_rt_i64_to_string(v as i64) }
+pub func to_string(v: isize) -> string { return core_rt_i64_to_string(v as i64) }
+pub func to_string(v: u8) -> string { return core_rt_u64_to_string(v as u64) }
+pub func to_string(v: u16) -> string { return core_rt_u64_to_string(v as u64) }
+pub func to_string(v: u32) -> string { return core_rt_u64_to_string(v as u64) }
+pub func to_string(v: u64) -> string { return core_rt_u64_to_string(v) }
+pub func to_string(v: usize) -> string { return core_rt_u64_to_string(v) }
+pub func to_string(v: f32) -> string { return core_rt_f32_to_string(v) }
+pub func to_string(v: f64) -> string { return core_rt_f64_to_string(v) }
+pub func to_string(v: bool) -> string { return core_rt_bool_to_string(v) }
+pub func to_string(v: char) -> string { return core_rt_char_to_string(v) }
+
 // --- common generic enums ---
 pub enum Option<T> {
     Some(T),
