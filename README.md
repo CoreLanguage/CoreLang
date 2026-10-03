@@ -95,7 +95,7 @@ enum Value {
 
 func describe(v: Value) -> string {
     match v {
-        Int(n)  { return "int: " + n as string }
+        Int(n)  { return "int: " + to_string(n) }
         Text(s) { return "text: " + s }
     }
 }
@@ -115,10 +115,12 @@ func main() {
 
     // generics are monomorphized
     say max_of(3, 7)
+    say describe(Value.Int(42))
 
     // threads + atomics
     counter = AtomicI32 { }
-    t = thread.spawn(func() { counter.store(42) })
+    pc = &counter // closures capture by value: share through a pointer
+    t = thread.spawn(func() { pc.store(42) })
     thread.join(t)
     say counter.load()
 }
