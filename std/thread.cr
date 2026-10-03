@@ -21,13 +21,10 @@ extern func core_rt_cond_signal(c: ptr<void>) -> void
 extern func core_rt_cond_broadcast(c: ptr<void>) -> void
 extern func core_rt_cond_free(c: ptr<void>) -> void
 
-// A running OS thread. spawn starts executing f immediately on a new
-// thread; join blocks until it finishes.
-pub class Thread {
-    handle: ptr<void>
-    pub func init(f: func()) { self.handle = core_rt_thread_spawn(f) }
-    pub func join() { core_rt_thread_join(self.handle); self.handle = null }
-}
+// Spawn runs f on a new OS thread and returns an opaque handle.
+// join blocks until the thread finishes and releases the handle.
+pub func spawn(f: func()) -> ptr<void> { return core_rt_thread_spawn(f) }
+pub func join(t: ptr<void>) { core_rt_thread_join(t) }
 
 pub class Mutex {
     handle: ptr<void>
@@ -58,6 +55,8 @@ pub class Cond {
 // Atomic integer with sequentially-consistent operations.
 pub class AtomicI32 {
     value: i32
+    pub func init() { }
+    pub func init(v: i32) { self.value = v }
     pub func load() -> i32 { return atomic_load(&self.value) }
     pub func store(v: i32) { atomic_store(&self.value, v) }
     // Returns the previous value.
@@ -72,6 +71,8 @@ pub class AtomicI32 {
 
 pub class AtomicI64 {
     value: i64
+    pub func init() { }
+    pub func init(v: i64) { self.value = v }
     pub func load() -> i64 { return atomic_load(&self.value) }
     pub func store(v: i64) { atomic_store(&self.value, v) }
     pub func add(v: i64) -> i64 { return atomic_add(&self.value, v) }

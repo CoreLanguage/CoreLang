@@ -1478,12 +1478,24 @@ llvm::Value *Codegen::emitBuiltinCall(ECall *c, Builtin b, const std::string &na
     return ConstantInt::get(builder.getInt64Ty(), c->loc.line);
   case Builtin::AtomicLoad: {
     Type *pt = args[0]->type->pointee;
+    if (pt->isBool()) {
+      // LLVM requires byte-sized atomics: bool uses an i8 cell
+      llvm::LoadInst *l = builder.CreateLoad(builder.getInt8Ty(), emitExpr(args[0]));
+      l->setOrdering(llvm::AtomicOrdering::SequentiallyConsistent);
+      return builder.CreateICmpNE(l, ConstantInt::get(builder.getInt8Ty(), 0));
+    }
     llvm::LoadInst *l = builder.CreateLoad(llvmType(pt), emitExpr(args[0]));
     l->setOrdering(llvm::AtomicOrdering::SequentiallyConsistent);
     return l;
   }
   case Builtin::AtomicStore: {
     Type *pt = args[0]->type->pointee;
+    if (pt->isBool()) {
+      llvm::Value *b = builder.CreateZExt(emitExpr(args[1]), builder.getInt8Ty());
+      llvm::StoreInst *s = builder.CreateStore(b, emitExpr(args[0]));
+      s->setOrdering(llvm::AtomicOrdering::SequentiallyConsistent);
+      return nullptr;
+    }
     llvm::StoreInst *s = builder.CreateStore(emitExpr(args[1]), emitExpr(args[0]));
     s->setOrdering(llvm::AtomicOrdering::SequentiallyConsistent);
     return nullptr;
@@ -1492,6 +1504,14 @@ llvm::Value *Codegen::emitBuiltinCall(ECall *c, Builtin b, const std::string &na
     llvm::AtomicRMWInst::BinOp op = b == Builtin::AtomicAdd ? llvm::AtomicRMWInst::Add
                                   : b == Builtin::AtomicSub ? llvm::AtomicRMWInst::Sub
                                                             : llvm::AtomicRMWInst::Xchg;
+    Type *pt = args[0]->type->pointee;
+    if (pt->isBool()) {
+      llvm::Value *b = builder.CreateZExt(emitExpr(args[1]), builder.getInt8Ty());
+      return builder.CreateICmpNE(
+          builder.CreateAtomicRMW(op, emitExpr(args[0]), b, llvm::MaybeAlign(),
+                                  llvm::AtomicOrdering::SequentiallyConsistent),
+          ConstantInt::get(builder.getInt8Ty(), 0));
+    }
     return builder.CreateAtomicRMW(op, emitExpr(args[0]), emitExpr(args[1]),
                                    llvm::MaybeAlign(), llvm::AtomicOrdering::SequentiallyConsistent);
   }
@@ -1499,6 +1519,16 @@ llvm::Value *Codegen::emitBuiltinCall(ECall *c, Builtin b, const std::string &na
     llvm::Value *ptr = emitExpr(args[0]);
     llvm::Value *cmp = emitExpr(args[1]);
     llvm::Value *nw = emitExpr(args[2]);
+    Type *pt = args[0]->type->pointee;
+    if (pt->isBool()) {
+      cmp = builder.CreateZExt(cmp, builder.getInt8Ty());
+      nw = builder.CreateZExt(nw, builder.getInt8Ty());
+      llvm::AtomicCmpXchgInst *cx = builder.CreateAtomicCmpXchg(
+          ptr, cmp, nw, llvm::MaybeAlign(), llvm::AtomicOrdering::SequentiallyConsistent,
+          llvm::AtomicOrdering::SequentiallyConsistent);
+      return builder.CreateICmpNE(builder.CreateExtractValue(cx, {0}),
+                                  ConstantInt::get(builder.getInt8Ty(), 0));
+    }
     llvm::AtomicCmpXchgInst *cx = builder.CreateAtomicCmpXchg(
         ptr, cmp, nw, llvm::MaybeAlign(), llvm::AtomicOrdering::SequentiallyConsistent,
         llvm::AtomicOrdering::SequentiallyConsistent);
@@ -1696,7 +1726,7 @@ llvm::Value *Codegen::emitLambda(ELambda *lam) {
   }
   emitBlock(lam->body);
   Type *rt = lam->retType ? sema.resolveType(lam->retType) : tc.prim(PRIM_void);
-  if (rt->isVoid() || rt->isNever()) builder.CreateRet(Constant::getNullValue(lfn->getReturnType()));
+  if (rt->isVoid() || rt->isNever()) builder.CreateRetVoid();
   else builder.CreateRet(emitDefaultValue(rt));
 
   fn = savedFn;
@@ -1715,7 +1745,7 @@ llvm::Value *Codegen::emitLambda(ELambda *lam) {
   unsigned ci = 0;
   for (auto &cap : lam->captures) {
     llvm::Value *srcAddr = nullptr;
-    auto it = localSlots.find(cap.name);
+    auto it = savedSlots.find(cap.name); // creator's slot for the captured variable
     if (it != savedSlots.end()) srcAddr = it->second;
     if (srcAddr) {
       llvm::Value *val = builder.CreateLoad(llvmType(cap.type), srcAddr);

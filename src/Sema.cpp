@@ -688,6 +688,22 @@ bool Sema::typesAssignable(Type *dst, Type *src, Expr *srcExpr, SourceLoc loc,
 }
 
 // -------------------------------------------------------------- scope util --
+void Sema::recordCapture(const std::string &name, Type *type, void *declScope) {
+  // Scopes carry depths: a local whose declaration depth is shallower than a
+  // lambda's base depth lives outside that lambda and must be captured.
+  LocalVar lv;
+  (void)declScope;
+  for (auto &[lam, baseDepth] : lambdaStack) {
+    if (!canReadVar(name, lv)) return;
+    if (lv.declDepth < baseDepth) {
+      bool found = false;
+      for (auto &c : lam->captures)
+        if (c.name == name) found = true;
+      if (!found) lam->captures.push_back({name, type, nullptr});
+    }
+  }
+}
+
 bool Sema::canReadVar(const std::string &name, LocalVar &out) {
   for (Scope *s = curScope; s; s = s->parent) {
     auto it = s->vars.find(name);
@@ -806,11 +822,15 @@ void Sema::checkFuncDecl(DFunc *f, std::map<std::string, Type *> genericSubst) {
   loopDepth = 0;
 
   // determine defining module (methods may be checked from other modules)
-  if (f->parent) {
-    Decl *pd = f->parent;
-    for (auto *m : modules) {
-      for (auto &[tname, td] : m->types)
-        if (td == pd) curModule = m;
+  {
+    auto fm = funcModule.find(f);
+    if (fm != funcModule.end()) curModule = fm->second;
+    else if (f->parent) {
+      Decl *pd = f->parent;
+      for (auto *m : modules) {
+        for (auto &[tname, td] : m->types)
+          if (td == pd) curModule = m;
+      }
     }
   }
 
@@ -840,6 +860,7 @@ void Sema::checkFuncDecl(DFunc *f, std::map<std::string, Type *> genericSubst) {
     lv.isMut = true;
     lv.declLoc = p.loc;
     lv.declScope = fnScope;
+    lv.declDepth = 0;
     (*fnScope).vars[p.name] = lv;
   }
 
@@ -907,6 +928,7 @@ void Sema::checkBlock(Stmt *blockStmt) {
   if (!blockStmt || blockStmt->kind != Stmt::KBlock) return;
   Scope blockScope;
   blockScope.parent = curScope;
+  blockScope.depth = curScope ? curScope->depth + 1 : 0;
   Scope *saved = curScope;
   curScope = &blockScope;
   auto *b = (SBlock *)blockStmt;
@@ -991,6 +1013,7 @@ void Sema::checkStmt(Stmt *s) {
       nlv.isMut = l->isMut;
       nlv.declLoc = l->loc;
       nlv.declScope = curScope;
+      nlv.declDepth = curScope ? curScope->depth : 0;
       curScope->vars[l->name] = nlv;
       l->resolvedType = declTy;
       l->isAssignExisting = false;
@@ -1012,6 +1035,7 @@ void Sema::checkStmt(Stmt *s) {
     lv.isConst = l->isConst;
     lv.declLoc = l->loc;
     lv.declScope = curScope;
+    lv.declDepth = curScope ? curScope->depth : 0;
     curScope->vars[l->name] = lv;
     l->resolvedType = declTy;
     l->isAssignExisting = false;
@@ -1216,7 +1240,7 @@ void Sema::checkExpr(Expr *e, bool lvalue) {
       id->idKind = IdKind::Local;
       id->scopeId = lv.declScope;
       e->type = lv.type;
-      if (lvalue == false && lv.isConst) { /* reading const fine */ }
+      if (!lambdaStack.empty()) recordCapture(name, lv.type, lv.declScope);
       return;
     }
     auto git = curModule->globals.find(name);
@@ -1296,6 +1320,7 @@ void Sema::checkExpr(Expr *e, bool lvalue) {
     if (canReadVar("self", lv)) {
       e->type = lv.type;
       ((ESelf *)e)->scopeId = lv.declScope;
+      if (!lambdaStack.empty()) recordCapture("self", lv.type, lv.declScope);
     } else {
       diag.error(e->loc, "self is only valid inside methods");
       e->type = tc.invalid();
@@ -1552,9 +1577,10 @@ void Sema::checkExpr(Expr *e, bool lvalue) {
       params.push_back(pt);
     }
     Type *ret = lam->retType ? resolveType(lam->retType) : tc.prim(PRIM_void);
-    // check body in nested scope
+    // check body in nested scope; captures recorded on resolution via depth
     Scope lamScope;
     lamScope.parent = curScope;
+    lamScope.depth = curScope ? curScope->depth + 1 : 1;
     Scope *saved = curScope;
     curScope = &lamScope;
     for (size_t pi = 0; pi < lam->params.size(); pi++) {
@@ -1563,6 +1589,7 @@ void Sema::checkExpr(Expr *e, bool lvalue) {
       lv.isMut = true;
       lv.declLoc = lam->params[pi].loc;
       lv.declScope = &lamScope;
+      lv.declDepth = lamScope.depth;
       lamScope.vars[lam->params[pi].name] = lv;
     }
     DFunc pseudo(e->loc);
@@ -1571,18 +1598,13 @@ void Sema::checkExpr(Expr *e, bool lvalue) {
     Type *savedRet = curReturnType;
     curFunc = &pseudo;
     curReturnType = ret;
+    lambdaStack.push_back({lam, lamScope.depth});
     checkBlock(lam->body);
+    lambdaStack.pop_back();
     curFunc = savedFunc;
     curReturnType = savedRet;
     curScope = saved;
 
-    // compute captures: EIdent locals declared OUTSIDE this lambda's scope chain
-    std::set<void *> ownScopes;
-    for (Scope *s = &lamScope; s; s = s->parent) ownScopes.insert((void *)s);
-    std::vector<ELambda::Capture> caps;
-    std::set<std::string> seen;
-    collectCaptures(lam->body, ownScopes, caps, seen);
-    lam->captures = caps;
     lam->closureType = tc.func(ret, params);
     e->type = lam->closureType;
     return;
@@ -1606,145 +1628,6 @@ void Sema::checkExpr(Expr *e, bool lvalue) {
   }
 }
 
-void Sema::collectCaptures(Stmt *s, std::set<void *> &ownScopes,
-                           std::vector<ELambda::Capture> &caps, std::set<std::string> &seen) {
-  if (!s) return;
-  switch (s->kind) {
-  case Stmt::KExpr: collectCapturesExpr(((SExpr *)s)->e, ownScopes, caps, seen); break;
-  case Stmt::KLet: {
-    auto *l = (SLet *)s;
-    if (l->init) collectCapturesExpr(l->init, ownScopes, caps, seen);
-    break;
-  }
-  case Stmt::KReturn: collectCapturesExpr(((SReturn *)s)->e, ownScopes, caps, seen); break;
-  case Stmt::KIf: {
-    auto *i = (SIf *)s;
-    collectCapturesExpr(i->cond, ownScopes, caps, seen);
-    collectCaptures(i->thenBlock, ownScopes, caps, seen);
-    collectCaptures(i->elseBlock, ownScopes, caps, seen);
-    break;
-  }
-  case Stmt::KWhile: {
-    auto *w = (SWhile *)s;
-    collectCapturesExpr(w->cond, ownScopes, caps, seen);
-    collectCaptures(w->body, ownScopes, caps, seen);
-    break;
-  }
-  case Stmt::KFor: {
-    auto *f = (SFor *)s;
-    collectCaptures(f->init, ownScopes, caps, seen);
-    collectCapturesExpr(f->cond, ownScopes, caps, seen);
-    collectCaptures(f->step, ownScopes, caps, seen);
-    collectCaptures(f->body, ownScopes, caps, seen);
-    break;
-  }
-  case Stmt::KForIn: {
-    auto *f = (SForIn *)s;
-    collectCapturesExpr(f->iterable, ownScopes, caps, seen);
-    collectCaptures(f->body, ownScopes, caps, seen);
-    break;
-  }
-  case Stmt::KSwitch: {
-    auto *sw = (SSwitch *)s;
-    collectCapturesExpr(sw->scrutinee, ownScopes, caps, seen);
-    for (auto &c : sw->cases) collectCaptures(c.body, ownScopes, caps, seen);
-    collectCaptures(sw->defaultBody, ownScopes, caps, seen);
-    break;
-  }
-  case Stmt::KBlock:
-    for (auto *x : ((SBlock *)s)->stmts) collectCaptures(x, ownScopes, caps, seen);
-    break;
-  case Stmt::KUnsafe:
-    for (auto *x : ((SUnsafe *)s)->stmts) collectCaptures(x, ownScopes, caps, seen);
-    break;
-  default: break;
-  }
-}
-
-void Sema::collectCapturesExpr(Expr *e, std::set<void *> &ownScopes,
-                               std::vector<ELambda::Capture> &caps, std::set<std::string> &seen) {
-  if (!e) return;
-  switch (e->kind) {
-  case Expr::Ident: {
-    auto *id = (EIdent *)e;
-    if (id->idKind == IdKind::Local && id->scopeId && !ownScopes.count(id->scopeId) &&
-        !seen.count(id->name)) {
-      seen.insert(id->name);
-      LocalVar lv;
-      canReadVar(id->name, lv);
-      caps.push_back({id->name, lv.type, id->scopeId});
-    }
-    break;
-  }
-  case Expr::Self: {
-    auto *id = (ESelf *)e;
-    if (id->scopeId && !ownScopes.count(id->scopeId) && !seen.count("self")) {
-      seen.insert("self");
-      LocalVar lv;
-      canReadVar("self", lv);
-      caps.push_back({"self", lv.type, id->scopeId});
-    }
-    break;
-  }
-  case Expr::Unary: collectCapturesExpr(((EUnary *)e)->operand, ownScopes, caps, seen); break;
-  case Expr::Binary: {
-    auto *b = (EBinary *)e;
-    collectCapturesExpr(b->lhs, ownScopes, caps, seen);
-    collectCapturesExpr(b->rhs, ownScopes, caps, seen);
-    break;
-  }
-  case Expr::Assign: {
-    auto *a = (EAssign *)e;
-    collectCapturesExpr(a->target, ownScopes, caps, seen);
-    collectCapturesExpr(a->value, ownScopes, caps, seen);
-    break;
-  }
-  case Expr::Cast: collectCapturesExpr(((ECast *)e)->e, ownScopes, caps, seen); break;
-  case Expr::Call: {
-    auto *c = (ECall *)e;
-    collectCapturesExpr(c->callee, ownScopes, caps, seen);
-    for (auto *a : c->args) collectCapturesExpr(a, ownScopes, caps, seen);
-    break;
-  }
-  case Expr::Member: {
-    auto *m = (EMember *)e;
-    collectCapturesExpr(m->obj, ownScopes, caps, seen);
-    break;
-  }
-  case Expr::Index: {
-    auto *m = (EIndex *)e;
-    collectCapturesExpr(m->base, ownScopes, caps, seen);
-    collectCapturesExpr(m->index, ownScopes, caps, seen);
-    break;
-  }
-  case Expr::StructLit: {
-    for (auto &[n, x] : ((EStructLit *)e)->fields) collectCapturesExpr(x, ownScopes, caps, seen);
-    break;
-  }
-  case Expr::ArrayLit: {
-    for (auto *x : ((EArrayLit *)e)->elems) collectCapturesExpr(x, ownScopes, caps, seen);
-    if (((EArrayLit *)e)->repeat) collectCapturesExpr(((EArrayLit *)e)->repeat, ownScopes, caps, seen);
-    break;
-  }
-  case Expr::Lambda: {
-    // nested lambda: capture chain handled as flat v1 (documented limitation)
-    for (auto &a : ((ELambda *)e)->captures) {
-      if (!ownScopes.count(a.scopeId) && !seen.count(a.name)) {
-        seen.insert(a.name);
-        caps.push_back(a);
-      }
-    }
-    break;
-  }
-  case Expr::Match: {
-    auto *m = (EMatch *)e;
-    collectCapturesExpr(m->scrutinee, ownScopes, caps, seen);
-    for (auto &arm : m->arms) collectCaptures(arm.body, ownScopes, caps, seen);
-    break;
-  }
-  default: break;
-  }
-}
 
 // -------------------------------------------------------------- binary ops --
 static bool isAssignOp(const std::string &op) {
@@ -2315,6 +2198,60 @@ Type *Sema::checkCall(ECall *call) {
   if (callee->kind == Expr::Ident) {
     auto *id = (EIdent *)callee;
     name = id->name;
+    // explicit generic arguments: `alloc_array<i32>(5)`
+    if (id->typeArgs) {
+      for (auto *a : call->args) checkExpr(a);
+      std::vector<DFunc *> gcands = lookupFuncsVisible(name);
+      DFunc *gtmpl = nullptr;
+      for (DFunc *g : gcands)
+        if (!g->genericParams.empty()) gtmpl = g;
+      if (!gtmpl) {
+        diag.error(call->loc, strfmt("function '%s' is not generic but explicit type arguments "
+                                     "were given", name.c_str()));
+        return nullptr;
+      }
+      if (id->typeArgs->genericArgs.size() != gtmpl->genericParams.size()) {
+        diag.error(call->loc, strfmt("'%s' expects %zu type arguments, got %zu", name.c_str(),
+                                     gtmpl->genericParams.size(),
+                                     id->typeArgs->genericArgs.size()));
+        return nullptr;
+      }
+      std::vector<Type *> gargs;
+      for (auto *gte : id->typeArgs->genericArgs) {
+        Type *gt = resolveType(gte);
+        if (!gt) return nullptr;
+        gargs.push_back(gt);
+      }
+      // arity check
+      if (call->args.size() != gtmpl->params.size()) {
+        diag.error(call->loc, strfmt("'%s' expects %zu arguments, got %zu", name.c_str(),
+                                     gtmpl->params.size(), call->args.size()));
+        return nullptr;
+      }
+      // arg type check under substitution
+      std::map<std::string, Type *> sub;
+      for (size_t gi = 0; gi < gtmpl->genericParams.size(); gi++) sub[gtmpl->genericParams[gi]] = gargs[gi];
+      auto *saved = subst;
+      subst = &sub;
+      for (size_t ai = 0; ai < call->args.size(); ai++) {
+        Type *want = resolveType(gtmpl->params[ai].type);
+        if (!typesAssignable(want, call->args[ai]->type, call->args[ai], call->args[ai]->loc, "argument")) {
+          subst = saved;
+          return nullptr;
+        }
+      }
+      subst = saved;
+      GenericInstance *gi = instantiateGeneric(gtmpl, gargs, call->loc);
+      if (!gi) return nullptr;
+      call->genInstance = gi;
+      id->idKind = IdKind::Func;
+      id->resolvedFunc = gtmpl;
+      auto *saved2 = subst;
+      subst = &sub;
+      Type *ret = gtmpl->retType ? resolveType(gtmpl->retType) : tc.prim(PRIM_void);
+      subst = saved2;
+      return ret;
+    }
     candidates = lookupFuncsVisible(name);
     if (candidates.empty()) {
       if (Decl *ed = lookupVariantCtor(name)) {
@@ -2583,11 +2520,16 @@ GenericInstance *Sema::instantiateGeneric(DFunc *tmpl, const std::vector<Type *>
   instanceOrder.push_back(gi);
 
   // clone the template body and check it under substitution
-  ASTCloner cloner(ctx);
-  DFunc *clone = ctx.make<DFunc>(tmpl->loc);
+  static ASTContext cloneArena; // process-lifetime arena for instantiation clones
+  ASTCloner cloner(cloneArena);
+  DFunc *clone = cloneArena.make<DFunc>(tmpl->loc);
   clone->name = tmpl->name;
   clone->genericParams = tmpl->genericParams; // keeps subst active in codegen
   clone->parent = tmpl->parent;
+  { // the clone belongs to the template's defining module
+    auto fm = funcModule.find(tmpl);
+    if (fm != funcModule.end()) funcModule[clone] = fm->second;
+  }
   clone->isPub = tmpl->isPub;
   clone->isStatic = tmpl->isStatic;
   clone->isVariadic = tmpl->isVariadic;

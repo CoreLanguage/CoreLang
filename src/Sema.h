@@ -10,6 +10,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <vector>
 
 namespace core {
 
@@ -26,7 +27,7 @@ struct ModuleSema {
   std::map<std::string, std::vector<DFunc *>> funcs;   // overload sets
   std::map<std::string, DGlobal *> globals;
   std::map<std::string, DConst *> consts;
-  std::vector<std::pair<std::string, ModuleSema *>> imports; // name -> module (alias or first part)
+  std::vector<std::pair<std::string, ModuleSema *>> imports; // name -> module
 };
 
 // A monomorphized generic instance (function or method).
@@ -34,7 +35,7 @@ struct GenericInstance {
   DFunc *tmpl = nullptr;
   DFunc *clonedFunc = nullptr; // cloned+checked body (per instance)
   std::vector<Type *> args;
-  std::string mangledName; // filled by sema
+  std::string mangledName;
 };
 
 // Resolved class layout: fields in memory order (vptr first if polymorphic).
@@ -42,10 +43,10 @@ struct ClassLayout {
   DClass *cls = nullptr;
   bool polymorphic = false;         // has vptr
   DClass *base = nullptr;
-  std::vector<std::pair<std::string, Type *>> allFields; // name, type (own fields only for struct)
+  std::vector<std::pair<std::string, Type *>> allFields;
   std::vector<DFunc *> vtableOrder;                 // virtual methods in slot order
   std::map<std::string, int> vtableSlots;
-  std::vector<std::pair<DInterface *, std::string>> interfaces; // implemented ifaces (decl, mangled iface name)
+  std::vector<std::pair<DInterface *, std::string>> interfaces;
 };
 
 // Builtin function ids for calls the compiler itself implements.
@@ -54,49 +55,46 @@ enum class Builtin {
   AtomicLoad, AtomicStore, AtomicAdd, AtomicSub, AtomicSwap, AtomicCas, AtomicFence,
   VolatileLoad, VolatileStore,
   Asm, AsmVolatile,
-  Splat, SimdExtract, SimdReplace, // suffixed variants resolved by name
+  Splat, SimdExtract, SimdReplace,
 };
 
 class Sema {
 public:
   Sema(TypeContext &tc, Diagnostics &diag) : tc(tc), diag(diag) {}
 
-  // Phase 1: register all toplevel decls of every module (in dependency order,
-  // prelude first). Returns false on errors.
-  bool registerModules(std::vector<ModuleSema *> &modules);
-  // Phase 2: type check every function body. Returns false on errors.
+  bool registerModules(std::vector<ModuleSema *> &mods);
   bool checkAll();
-  // Phase 3: main entry checks.
   bool checkEntry(ModuleSema *m);
 
   TypeContext &tc;
   Diagnostics &diag;
-  ASTContext ctx; // node arena for generic instantiations
   std::vector<ModuleSema *> modules; // dependency order, prelude first
   std::map<std::string, ModuleSema *> byPath;
   std::map<DFunc *, ModuleSema *> funcModule; // defining module per function
   std::map<void *, ModuleSema *> declModule;  // defining module per type decl
-  std::map<Decl *, ClassLayout *> layouts;   // DClass* -> layout (also structs)
+  std::map<Decl *, ClassLayout *> layouts;
   std::map<std::pair<DFunc *, std::string>, GenericInstance *> instances;
-  std::vector<GenericInstance *> instanceOrder; // deterministic emission order
+  std::vector<GenericInstance *> instanceOrder;
   ModuleSema *prelude = nullptr;
 
-  // ---- helper API used by codegen ----
+  // helper API used by codegen
   ClassLayout *layoutOf(Decl *structOrClass);
-  Type *typeOf(Expr *e);             // annotated type (after checkAll)
+  Type *typeOf(Expr *e);
   std::string mangleFuncName(DFunc *f, const std::vector<Type *> &genericArgs);
   GenericInstance *findInstance(DFunc *tmpl, const std::vector<Type *> &args);
-  const std::vector<DFunc *> &virtualSlots(DClass *c); // for base-chain lookup
   std::string mangleTypeForName(Type *t);
-  int quiet_ = 0;
 
-  // active checking context (public: Codegen reads substitution/layout state)
+  // active checking context (public: Codegen reads substitution state)
   ModuleSema *curModule = nullptr;
+  std::vector<std::pair<ELambda *, int>> lambdaStack; // (lambda, base depth)
+  void recordCapture(const std::string &name, Type *type, void *declScope);
   DFunc *curFunc = nullptr;
   Type *curReturnType = nullptr;
-  std::map<std::string, Type *> *subst = nullptr; // generic substitution
+  std::map<std::string, Type *> *subst = nullptr;
   int unsafeDepth = 0;
   int loopDepth = 0;
+  int quiet_ = 0;
+  int noStructLit_ = 0;
 
   struct LocalVar {
     Type *type = nullptr;
@@ -104,18 +102,19 @@ public:
     bool isConst = false;
     SourceLoc declLoc;
     void *declScope = nullptr;
+    int declDepth = -1;
   };
   struct Scope {
     Scope *parent = nullptr;
+    int depth = 0;
     std::map<std::string, LocalVar> vars;
   };
-  ModuleSema *entryModule = nullptr;
   Scope *curScope = nullptr;
+  ModuleSema *entryModule = nullptr;
 
   // type resolution
   Type *resolveType(TypeExpr *te);
   Type *resolveNamedType(TypeExpr *te);
-  unsigned long long constUint(Expr *e, bool &ok);
 
   // statements/expressions
   void checkFuncDecl(DFunc *f, std::map<std::string, Type *> genericSubst);
@@ -126,14 +125,28 @@ public:
   void checkAssign(EAssign *a);
   void checkCast(ECast *c);
   Type *checkMatch(EMatch *m);
-  void collectCaptures(Stmt *s, std::set<void *> &ownScopes,
-                       std::vector<ELambda::Capture> &caps, std::set<std::string> &seen);
-  void collectCapturesExpr(Expr *e, std::set<void *> &ownScopes,
-                           std::vector<ELambda::Capture> &caps, std::set<std::string> &seen);
+  Type *checkCall(ECall *call);
+  Type *checkBuiltinCall(ECall *call, Builtin b, const std::string &name);
+  Decl *lookupVariantCtor(const std::string &name, Type **outEnumTy = nullptr);
+  Type *checkVariantCtor(ECall *call, DEnum *e, const std::string &vname, Type *knownType = nullptr);
+  void checkPattern(Pattern *p, Type *scrutinee, std::vector<std::pair<std::string, Type *>> &binds);
+  Expr *constFold(Expr *e);
+  unsigned long long evalConstUint(Expr *e, bool &ok);
+  bool terminates(Stmt *s);
+  bool containsBreak(Stmt *s);
+  DFunc *resolveOverload(const std::vector<DFunc *> &cands, const std::vector<Expr *> &args,
+                         SourceLoc loc, const std::string &name, bool &ok);
+  bool typesAssignable(Type *dst, Type *src, Expr *srcExpr, SourceLoc loc, const std::string &what);
+  bool isLValue(Expr *e);
+  GenericInstance *instantiateGeneric(DFunc *tmpl, const std::vector<Type *> &args, SourceLoc loc);
+  Type *checkMemberForRead(EMember *m);
+  Type *resolveEnumArgs(DEnum *e, std::vector<Type *> args);
+  DEnum *enumOf(Type *t) { return t && t->isEnum() ? (DEnum *)t->decl : nullptr; }
+  int fieldIndexOf(Type *structTy, const std::string &name);
+  Type *fieldTypeOf(Type *structTy, const std::string &name);
+  Type *substituteFieldType(TypeExpr *te, Type *structTy);
   Type *selfTypeOf(DFunc *f);
   bool unifyTypes(Type *want, Type *got, std::map<std::string, Type *> &vars);
-  Type *checkMemberForRead(EMember *m);
-  bool canReadVar(const std::string &name, LocalVar &out);
 
   // symbol lookup
   Decl *lookupTypeOwn(const std::string &name);
@@ -141,33 +154,11 @@ public:
   std::vector<DFunc *> lookupFuncsVisible(const std::string &name, ModuleSema **via = nullptr);
   bool visible(Decl *d, ModuleSema *from);
   ModuleSema *lookupModuleRef(const std::string &name);
-
-  // helpers
-  Type *defaultValueType(Type *t);
-  bool terminates(Stmt *s);
-  void checkVarInit(Expr *init);
-  Expr *constFold(Expr *e); // returns folded literal or original
-  unsigned long long evalConstUint(Expr *e, bool &ok);
+  bool canReadVar(const std::string &name, LocalVar &out);
 
   // class layout construction
   void buildLayout(DClass *c);
   void buildStructLayout(DStruct *s);
-  Type *checkCall(ECall *call);
-  Type *checkBuiltinCall(ECall *call, Builtin b, const std::string &name);
-  Decl *lookupVariantCtor(const std::string &name, Type **outEnumTy = nullptr);
-  Type *checkVariantCtor(ECall *call, DEnum *e, const std::string &vname, Type *knownType = nullptr);
-  void checkPattern(Pattern *p, Type *scrutinee, std::vector<std::pair<std::string, Type *>> &binds);
-  bool containsBreak(Stmt *s);
-  DFunc *resolveOverload(const std::vector<DFunc *> &cands, const std::vector<Expr *> &args,
-                         SourceLoc loc, const std::string &name, bool &ok);
-  bool typesAssignable(Type *dst, Type *src, Expr *srcExpr, SourceLoc loc, const std::string &what);
-  bool isLValue(Expr *e);
-  DEnum *enumOf(Type *t) { return t && t->isEnum() ? (DEnum *)t->decl : nullptr; }
-  int fieldIndexOf(Type *structTy, const std::string &name);
-  Type *fieldTypeOf(Type *structTy, const std::string &name);
-  Type *substituteFieldType(TypeExpr *te, Type *structTy);
-  Type *resolveEnumArgs(DEnum *e, std::vector<Type *> args);
-  GenericInstance *instantiateGeneric(DFunc *tmpl, const std::vector<Type *> &args, SourceLoc loc);
 };
 
 } // namespace core

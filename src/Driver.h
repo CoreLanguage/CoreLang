@@ -3,6 +3,7 @@
 #define CORE_DRIVER_H
 
 #include "Codegen.h"
+#include <deque>
 #include "Sema.h"
 #include <string>
 #include <vector>
@@ -43,7 +44,7 @@ public:
   int emitIR(const std::string &entryPath, bool asm_);  // emit-ir / emit-asm
   int linkObject(const std::string &objPath, const std::string &outputName);
 
-  std::vector<ModuleSema> loadedModules;   // stable storage
+  std::deque<ModuleSema> loadedModules;    // stable storage (deque: stable refs)
   std::vector<ModuleSema *> modulePtrs;    // topological order
   ASTContext ctx;                          // shared AST arena
   std::map<std::string, ModuleSema *> byCanonicalPath;

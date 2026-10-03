@@ -209,8 +209,16 @@ int runPipelineInternal(Driver &driver, const std::string &outputName, const std
   driver.modulePtrs = order;
 
   if (!sema->registerModules(modulePtrs_of(driver))) return 1;
-  ModuleSema *entry = driver.byCanonicalPath.count(entryPath)
-                          ? driver.byCanonicalPath[entryPath]
+  std::string entryCanon = entryPath;
+  {
+    char *real = realpath(entryPath.c_str(), nullptr);
+    if (real) {
+      entryCanon = real;
+      free(real);
+    }
+  }
+  ModuleSema *entry = driver.byCanonicalPath.count(entryCanon)
+                          ? driver.byCanonicalPath[entryCanon]
                           : &driver.loadedModules.back();
   if (!opts.freestanding) {
     if (!sema->checkEntry(entry)) return 1;
@@ -334,7 +342,7 @@ int Driver::linkObject(const std::string &objPath, const std::string &outputName
       return 1;
     }
     cmd += " " + runtimeObj;
-    cmd += " -lm -lpthread -ldl";
+    cmd += " -lm -lpthread -ldl -latomic";
     for (auto &lp : opts.libPaths) cmd += " -L" + lp;
     for (auto &lib : opts.linkLibs) cmd += " -l" + lib;
     for (auto &la : opts.linkArgs) cmd += " " + la;

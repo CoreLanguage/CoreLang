@@ -405,6 +405,7 @@ Expr *Parser::parsePrimary(bool noStructLit) {
       if (!expectPunct("(", "in lambda parameter list")) return nullptr;
       bool varUnused = false;
       auto params = parseParamList(varUnused);
+      if (!expectPunct(")", "closing lambda parameter list")) return nullptr;
       lam->params.clear();
       for (auto &p : params) {
         ELambda::Param lp;
@@ -475,7 +476,8 @@ Expr *Parser::parsePrimary(bool noStructLit) {
       }
       quiet_--;
       if (ok && eatPunct(">") &&
-          ((atPunct("{") && !tk().newlineBefore) || atPunct("."))) {
+          ((atPunct("{") && !tk().newlineBefore) || atPunct(".") ||
+           (atPunct("(") && !tk().newlineBefore))) {
         hasGenerics = true;
       } else {
         i = save; // rewind: not a generic struct literal
