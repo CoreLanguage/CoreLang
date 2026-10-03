@@ -15,6 +15,7 @@
 #include <pthread.h>
 #include <time.h>
 #include <unistd.h>
+#include <math.h>
 
 /* Core's `string` value: a view {pointer, byte length}. */
 typedef struct { const char *ptr; unsigned long long len; } CRString;
@@ -104,6 +105,9 @@ void *core_rt_alloc_zero(unsigned long long size) {
 }
 void *core_rt_alloc_aligned(unsigned long long size, unsigned long long align) {
   if (align == 0) align = 1;
+  /* glibc malloc already returns 16-byte alignment; POSIX requires
+     posix_memalign alignments to be multiples of sizeof(void*). */
+  if (align <= 16) return core_rt_alloc(size);
   void *p = NULL;
   int rc = posix_memalign(&p, (size_t)align, (size_t)(size ? size : 1));
   if (rc != 0 || !p) { fputs("panic: out of memory (aligned)\n", stderr); abort(); }
@@ -272,4 +276,39 @@ CRString core_rt_arg(int i) {
 void core_rt_save_args(int argc, char **argv) {
   cr_argc_real = argc;
   cr_argv_real = argv;
+}
+
+/* ----------------------------------------------------------------- math -- */
+double core_rt_sqrt(double x) { return sqrt(x); }
+double core_rt_pow(double x, double y) { return pow(x, y); }
+double core_rt_sin(double x) { return sin(x); }
+double core_rt_cos(double x) { return cos(x); }
+double core_rt_fabs(double x) { return fabs(x); }
+double core_rt_floor(double x) { return floor(x); }
+double core_rt_ceil(double x) { return ceil(x); }
+
+/* --------------------------------------------------------- to-string -- */
+CRString core_rt_f64_to_string(double v) {
+  char buf[40];
+  int n = snprintf(buf, sizeof buf, "%.17g", v);
+  return core_rt_str_concat(cr_str(buf, (unsigned)n), cr_str("", 0));
+}
+CRString core_rt_f32_to_string(float v) {
+  char buf[40];
+  int n = snprintf(buf, sizeof buf, "%.9g", (double)v);
+  return core_rt_str_concat(cr_str(buf, (unsigned)n), cr_str("", 0));
+}
+CRString core_rt_bool_to_string(int b) {
+  return b ? cr_str("true", 4) : cr_str("false", 5);
+}
+CRString core_rt_char_to_string(unsigned c) {
+  char *buf = (char *)malloc(2);
+  buf[0] = (char)c;
+  buf[1] = 0;
+  return cr_str(buf, 1);
+}
+CRString core_rt_u64_to_string(unsigned long long v) {
+  char buf[32];
+  int n = snprintf(buf, sizeof buf, "%llu", v);
+  return core_rt_str_concat(cr_str(buf, (unsigned)n), cr_str("", 0));
 }
