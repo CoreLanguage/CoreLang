@@ -51,11 +51,12 @@ add_dependencies(core core_runtime)
 
 file(GLOB CORE_STD_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/std/*.cr)
 
-add_custom_command(TARGET core POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CORE_RUNTIME_OBJ} $<TARGET_FILE_DIR:core>/corert.o
-  COMMAND ${CMAKE_COMMAND} -E make_directory $<TARGET_FILE_DIR:core>/std
-  COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CORE_STD_SRCS} $<TARGET_FILE_DIR:core>/std/
-  COMMENT "Installing Core runtime + stdlib next to compiler")
+foreach(STD_SRC ${CORE_STD_SRCS})
+  get_filename_component(STD_NAME ${STD_SRC} NAME)
+  add_custom_command(TARGET core POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different ${STD_SRC} $<TARGET_FILE_DIR:core>/std/${STD_NAME}
+    COMMENT "Installing std/${STD_NAME}")
+endforeach()
 
 # ---------------------------------------------------------------------------
 # Tests
