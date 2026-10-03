@@ -34,6 +34,8 @@ def main():
     global CORE
     ap = argparse.ArgumentParser()
     ap.add_argument("--core", default="build/core")
+    ap.add_argument("--with-clean-build", action="store_true",
+                    help="also verify a from-scratch CMake build (slow)")
     args = ap.parse_args()
     CORE = os.path.abspath(args.core)
 
@@ -206,6 +208,13 @@ func main() {
 
     # 29-30: independence + clean build
     ok("29. binaries run independently of the source tree", True)  # shown in 17
+    if args.with_clean_build:
+        cb = os.path.join(w, "cleanbuild")
+        r = sh(["cmake", "-S", root, "-B", cb])
+        r2 = sh(["cmake", "--build", cb], cwd=root)
+        ok("30. repository builds cleanly from scratch (CMake/LLVM)",
+           r.returncode == 0 and r2.returncode == 0 and
+           os.path.exists(os.path.join(cb, "core")), r2.stderr[-400:])
     print("\n%d passed, %d failed" % (PASS, FAIL))
     return 1 if FAIL else 0
 
