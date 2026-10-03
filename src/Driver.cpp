@@ -171,6 +171,10 @@ int Driver::compile(const std::string &outputName, const std::string &entryPath)
   return runPipelineInternal(*this, outputName, entryPath, PipelineMode::EmitBinary);
 }
 
+static bool outputExists(const std::string &outputName) {
+  return fileExists(outputName) || fileExists(outputName + ".coreobj.o");
+}
+
 int runPipelineInternal(Driver &driver, const std::string &outputName, const std::string &entryPath,
                         PipelineMode mode) {
   DriverOptions &opts = driver.opts;
@@ -191,6 +195,13 @@ int runPipelineInternal(Driver &driver, const std::string &outputName, const std
     }
     std::vector<std::string> chain;
     if (!driver.loadModule(preludePath, chain)) return 1;
+  }
+
+  // output file protection: refuse to overwrite unless --force
+  if ((mode == PipelineMode::EmitBinary || mode == PipelineMode::EmitObject) && !outputName.empty() &&
+      outputExists(outputName) && !opts.forceOverwrite) {
+    diag.plainError(strfmt("output '%s' already exists (pass --force to overwrite)", outputName.c_str()));
+    return 1;
   }
 
   Sema semaObj(driver.tc, diag);

@@ -444,6 +444,7 @@ int cmdBuild(DriverOptions &opts) {
   Diagnostics diag(sm);
   Manifest m;
   if (!setupProjectDriver(opts, m, diag)) return 1;
+  opts.forceOverwrite = true; // build artifacts are repeatable
   Driver d(opts);
   std::string entry = joinPath(joinPath(".", m.sourceDir.empty() ? "src" : m.sourceDir), "main.cr");
   if (!fileExists(entry)) {
@@ -458,6 +459,7 @@ int cmdRun(DriverOptions &opts, const std::vector<std::string> &args) {
   Diagnostics diag(sm);
   Manifest m;
   if (!setupProjectDriver(opts, m, diag)) return 1;
+  opts.forceOverwrite = true;
   Driver d(opts);
   std::string entry = joinPath(joinPath(".", m.sourceDir.empty() ? "src" : m.sourceDir), "main.cr");
   if (!fileExists(entry)) {
@@ -513,6 +515,7 @@ int cmdTest(DriverOptions &opts) {
   int total = 0;
   for (auto &tf : testFiles) {
     DriverOptions topts = opts;
+    topts.forceOverwrite = true;
     Driver d(topts);
     // output name = the test file's basename (no path, no extension)
     size_t slash = tf.find_last_of('/');
