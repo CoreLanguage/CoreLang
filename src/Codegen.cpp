@@ -963,6 +963,18 @@ llvm::Value *Codegen::emitExpr(Expr *e) {
     return emitLambda((ELambda *)e);
   case Expr::Match:
     return emitMatch((EMatch *)e);
+  case Expr::UnsafeExpr: {
+    auto *ue = (EUnsafeExpr *)e;
+    llvm::Value *last = nullptr;
+    for (size_t si = 0; si < ue->stmts.size(); si++) {
+      if (si + 1 == ue->stmts.size() && ue->stmts[si]->kind == Stmt::KExpr) {
+        last = emitExpr(((SExpr *)ue->stmts[si])->e);
+        continue;
+      }
+      emitStmt(ue->stmts[si]);
+    }
+    return last ? last : Constant::getNullValue(builder.getInt32Ty());
+  }
   case Expr::Sizeof: case Expr::Alignof: {
     if (llvm::Constant *c = evalConst(e)) return c;
     return Constant::getNullValue(builder.getInt64Ty());
@@ -970,6 +982,23 @@ llvm::Value *Codegen::emitExpr(Expr *e) {
   default:
     return Constant::getNullValue(llvmType(e->type ? e->type : tc.prim(PRIM_i32)));
   }
+}
+
+// Pull the byte content out of a constant Core string (struct {ptr, len}).
+static std::string stringConstantBytes(llvm::Constant *c) {
+  if (!c) return "";
+  if (auto *cs = dyn_cast<llvm::ConstantStruct>(c)) {
+    llvm::Constant *p = cs->getOperand(0);
+    if (auto *ce = dyn_cast<llvm::ConstantExpr>(p)) {
+      if (ce->getOpcode() == llvm::Instruction::BitCast)
+        p = ce->getOperand(0);
+    }
+    if (auto *g = dyn_cast<llvm::GlobalVariable>(p)) {
+      if (auto *cda = dyn_cast<llvm::ConstantDataArray>(g->getInitializer()))
+        return cda->getAsString().str();
+    }
+  }
+  return "";
 }
 
 bool Codegen::enumHasPayloads(DEnum *e) {
@@ -1558,25 +1587,11 @@ llvm::Value *Codegen::emitBuiltinCall(ECall *c, Builtin b, const std::string &na
     llvm::Value *tmpl = emitExpr(args[0]);
     llvm::Value *cons = emitExpr(args[1]);
     std::string tmplStr, consStr;
-    // extract constant strings
-    if (auto *sv = dyn_cast<llvm::Constant>(tmpl)) {
-      // pull the byte array out of the string struct
-      if (auto *cs = dyn_cast<llvm::ConstantStruct>(sv)) {
-        if (auto *g = dyn_cast<llvm::GlobalVariable>(cs->getOperand(0))) {
-          if (auto *cda = dyn_cast<llvm::ConstantDataArray>(g->getInitializer()))
-            tmplStr = cda->getAsString().str();
-        }
-      }
-    }
-    if (auto *sv = dyn_cast<llvm::Constant>(cons)) {
-      if (auto *cs = dyn_cast<llvm::ConstantStruct>(sv)) {
-        if (auto *g = dyn_cast<llvm::GlobalVariable>(cs->getOperand(0))) {
-          if (auto *cda = dyn_cast<llvm::ConstantDataArray>(g->getInitializer()))
-            consStr = cda->getAsString().str();
-        }
-      }
-    }
-    if (tmplStr.empty() || consStr.empty()) {
+    tmplStr = stringConstantBytes(dyn_cast<llvm::Constant>(tmpl));
+    consStr = stringConstantBytes(dyn_cast<llvm::Constant>(cons));
+    if (getenv("CORE_DBG"))
+      fprintf(stderr, "[asm] tmpl kind=%d empty=%d\n", (int)tmpl->getValueID(), tmplStr.empty());
+    if (tmplStr.empty()) {
       diag.error(c->loc, "inline asm template and constraints must be string literals");
       return Constant::getNullValue(builder.getInt64Ty());
     }

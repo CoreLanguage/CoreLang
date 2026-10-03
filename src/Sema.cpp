@@ -407,6 +407,7 @@ Type *Sema::resolveNamedType(TypeExpr *te) {
 // ============================================================== mangling ====
 std::string Sema::mangleFuncName(DFunc *f, const std::vector<Type *> &genericArgs) {
   if (f->isExtern) return f->linkName.empty() ? f->name : f->linkName;
+  if (!f->linkName.empty()) return f->linkName; // explicit symbol override (@link_name)
   if (f->name == "main" && f->parent == nullptr && !f->isExtern) return "main";
   std::string out = "_C";
   // module path components: the DEFINING module of this function
@@ -1613,6 +1614,18 @@ void Sema::checkExpr(Expr *e, bool lvalue) {
     e->type = checkMatch((EMatch *)e);
     return;
   }
+  case Expr::UnsafeExpr: {
+    auto *ue = (EUnsafeExpr *)e;
+    unsafeDepth++;
+    for (size_t si = 0; si < ue->stmts.size(); si++) {
+      checkStmt(ue->stmts[si]);
+      if (si + 1 == ue->stmts.size() && ue->stmts[si]->kind == Stmt::KExpr)
+        e->type = ((SExpr *)ue->stmts[si])->e->type;
+    }
+    unsafeDepth--;
+    if (!e->type) e->type = tc.prim(PRIM_void);
+    return;
+  }
   case Expr::Range: {
     diag.error(e->loc, "ranges are only valid in `for x in a..b` loops");
     return;
@@ -2739,10 +2752,18 @@ Type *Sema::checkBuiltinCall(ECall *call, Builtin b, const std::string &name) {
                                    "template and constraint strings are required", name.c_str()));
       return nullptr;
     }
-    for (auto *a : args) {
-      Type *t = a->type;
+    if (args[0]->type && !args[0]->type->isString()) {
+      diag.error(args[0]->loc, "the first inline asm argument must be the template string");
+      return nullptr;
+    }
+    if (args[1]->type && !args[1]->type->isString()) {
+      diag.error(args[1]->loc, "the second inline asm argument must be the constraint string");
+      return nullptr;
+    }
+    for (size_t ai = 2; ai < args.size(); ai++) {
+      Type *t = args[ai]->type;
       if (!t || !(t->isInt() || t->isPtr() || t->isBool() || t->isChar())) {
-        diag.error(a->loc, "inline asm arguments must be integers, pointers or bools");
+        diag.error(args[ai]->loc, "inline asm arguments must be integers, pointers or bools");
         return nullptr;
       }
     }

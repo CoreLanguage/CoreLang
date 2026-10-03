@@ -117,6 +117,13 @@ public:
       copyId(n, e);
       return n;
     }
+    case Expr::UnsafeExpr: {
+      auto *u = (EUnsafeExpr *)e;
+      auto *n = ctx.make<EUnsafeExpr>(e->loc);
+      for (auto *x : u->stmts) n->stmts.push_back(stmt(x));
+      copyId(n, e);
+      return n;
+    }
     case Expr::Match: {
       auto *m = (EMatch *)e;
       auto *n = ctx.make<EMatch>(e->loc);

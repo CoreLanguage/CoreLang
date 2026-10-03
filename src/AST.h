@@ -68,7 +68,7 @@ struct Expr {
   enum Kind {
     IntLit, FloatLit, BoolLit, CharLit, StringLit, NullLit,
     Ident, Self, Unary, Binary, Assign, Cast, Call, Member, Index,
-    StructLit, ArrayLit, Lambda, Match, Range, Sizeof, Alignof,
+    StructLit, ArrayLit, Lambda, Match, Range, Sizeof, Alignof, UnsafeExpr,
   };
   Kind kind;
   SourceLoc loc;
@@ -186,6 +186,10 @@ struct ELambda : Expr {
 struct MatchArm {
   Pattern *pattern = nullptr;
   Stmt *body = nullptr; // SBlock
+};
+struct EUnsafeExpr : Expr {
+  std::vector<Stmt *> stmts;
+  EUnsafeExpr(SourceLoc l) : Expr(UnsafeExpr, l) {}
 };
 struct EMatch : Expr {
   Expr *scrutinee = nullptr;

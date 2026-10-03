@@ -324,6 +324,16 @@ int runPipelineInternal(Driver &driver, const std::string &outputName, const std
     fprintf(stderr, "wrote object file: %s\n", objFile.c_str());
     return 0;
   }
+  // cross compilation: linking requires a target linker; stop at the object
+  // unless the user supplies linker arguments for the target toolchain
+  if (!opts.targetTriple.empty() && tripleStr != std::string(llvm::sys::getDefaultTargetTriple())) {
+    if (opts.linkArgs.empty()) {
+      fprintf(stderr, "cross-compiling for %s: wrote object file %s\n"
+                      "  (link it with a %s toolchain, or pass --link-arg=... for a cross linker)\n",
+              tripleStr.c_str(), objFile.c_str(), tripleStr.c_str());
+      return 0;
+    }
+  }
   return driver.linkObject(objFile, outputName);
 }
 

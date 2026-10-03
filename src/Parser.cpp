@@ -423,6 +423,14 @@ Expr *Parser::parsePrimary(bool noStructLit) {
       if (!lam->body) return nullptr;
       return lam;
     }
+    if (t0.text == "unsafe") {
+      advance();
+      Stmt *b = parseBlock();
+      if (!b) return nullptr;
+      auto *ue = ctx.make<EUnsafeExpr>(l);
+      ue->stmts = ((SBlock *)b)->stmts;
+      return ue;
+    }
     if (t0.text == "match") {
       advance();
       Expr *scrut = parseExpr(true);
