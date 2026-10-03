@@ -44,6 +44,8 @@ pub func say(v: u16)    { core_rt_print_u16(v); core_rt_print_nl() }
 pub func say(v: u32)    { core_rt_print_u32(v); core_rt_print_nl() }
 pub func say(v: u64)    { core_rt_print_u64(v); core_rt_print_nl() }
 pub func say(v: u128)   { core_rt_print_u128(v); core_rt_print_nl() }
+pub func say(v: usize)  { core_rt_print_u64(v as u64); core_rt_print_nl() }
+pub func say(v: isize)  { core_rt_print_i64(v as i64); core_rt_print_nl() }
 pub func say(v: f32)    { core_rt_print_f32(v); core_rt_print_nl() }
 pub func say(v: f64)    { core_rt_print_f64(v); core_rt_print_nl() }
 pub func say<T>(v: ptr<T>) {

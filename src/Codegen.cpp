@@ -459,18 +459,28 @@ bool Codegen::generate(llvm::Module &module, ModuleSema *entryModule) {
     dbgEnabled = true;
   }
 
-  // 1. declare everything: globals, functions (prelude first)
+  // 1. declare everything: globals, functions, methods (prelude first)
+  auto declareDecl = [&](Decl *d) {
+    if (d->kind == Decl::Global) globalFor((DGlobal *)d);
+    else if (d->kind == Decl::Func) {
+      auto *f = (DFunc *)d;
+      if (f->genericParams.empty()) declareFunc(f, {});
+    } else if (d->kind == Decl::Extern) {
+      declareFunc(((DExtern *)d)->proto, {});
+    } else if (d->kind == Decl::Class) {
+      for (DFunc *mth : ((DClass *)d)->methods)
+        if (mth->genericParams.empty()) declareFunc(mth, {});
+    } else if (d->kind == Decl::Struct) {
+      for (DFunc *mth : ((DStruct *)d)->methods)
+        if (mth->genericParams.empty()) declareFunc(mth, {});
+    } else if (d->kind == Decl::Interface || d->kind == Decl::Trait) {
+      for (DFunc *mth : ((DInterface *)d)->methods)
+        if (mth->genericParams.empty() && mth->body) declareFunc(mth, {}); // trait defaults
+    }
+  };
   for (auto *m : sema.modules) {
     curModule = m;
-    for (Decl *d : m->unit->decls) {
-      if (d->kind == Decl::Global) globalFor((DGlobal *)d);
-      else if (d->kind == Decl::Func) {
-        auto *f = (DFunc *)d;
-        if (f->genericParams.empty()) declareFunc(f, {});
-      } else if (d->kind == Decl::Extern) {
-        declareFunc(((DExtern *)d)->proto, {});
-      }
-    }
+    for (Decl *d : m->unit->decls) declareDecl(d);
   }
   // generic instances (instantiation may create more while emitting)
   for (size_t i = 0; i < sema.instanceOrder.size(); i++) {
@@ -486,6 +496,15 @@ bool Codegen::generate(llvm::Module &module, ModuleSema *entryModule) {
         if (d->kind == Decl::Func) {
           auto *f = (DFunc *)d;
           if (f->genericParams.empty()) emitFuncBody(f, {});
+        } else if (d->kind == Decl::Class) {
+          for (DFunc *mth : ((DClass *)d)->methods)
+            if (mth->genericParams.empty()) emitFuncBody(mth, {});
+        } else if (d->kind == Decl::Struct) {
+          for (DFunc *mth : ((DStruct *)d)->methods)
+            if (mth->genericParams.empty()) emitFuncBody(mth, {});
+        } else if (d->kind == Decl::Interface || d->kind == Decl::Trait) {
+          for (DFunc *mth : ((DInterface *)d)->methods)
+            if (mth->genericParams.empty() && mth->body) emitFuncBody(mth, {});
         }
       }
     }
@@ -582,17 +601,6 @@ void Codegen::emitFuncBody(DFunc *f, const std::vector<Type *> &genericArgs) {
     }
   }
 
-  // init methods set the vptr for polymorphic classes
-  if (f->name == "init" && f->parent && f->parent->kind == Decl::Class && !f->isStatic) {
-    DClass *c = (DClass *)f->parent;
-    ClassLayout *cl = sema.layoutOf(c);
-    if (cl && cl->polymorphic) {
-      llvm::Value *selfPtr = builder.CreateLoad(PointerType::get(ctx, 0), localSlots["self"]);
-      llvm::Value *vt = vtableFor(c);
-      builder.CreateStore(vt, selfPtr);
-    }
-  }
-
   emitBlock(f->body);
 
   // epilogue: default return value if the block can fall through
@@ -601,8 +609,9 @@ void Codegen::emitFuncBody(DFunc *f, const std::vector<Type *> &genericArgs) {
   bool isEntryMain = f->name == "main" && f->parent == nullptr && !f->isExtern;
   if (returnsNothing) {
     if (isEntryMain) builder.CreateRet(ConstantInt::get(builder.getInt32Ty(), 0));
-    else builder.CreateRetVoid();
+    else { emitVptrStoreIfInit(f); builder.CreateRetVoid(); }
   } else {
+    emitVptrStoreIfInit(f);
     llvm::Value *dv = emitDefaultValue(retTy);
     if (!dv) {
       fprintf(stderr, "internal: default value is null for type '%s' in '%s'\n",
@@ -616,6 +625,20 @@ void Codegen::emitFuncBody(DFunc *f, const std::vector<Type *> &genericArgs) {
   curSP = savedSP;
   curFuncDecl = savedDecl;
   curModule = savedModule;
+}
+
+// Constructors store their own class's vtable on every exit; because a
+// derived init calls the base init and runs LAST, the most-derived vtable
+// wins (documented in docs/language/classes.md).
+void Codegen::emitVptrStoreIfInit(DFunc *f) {
+  if (f->name != "init" || !f->parent || f->parent->kind != Decl::Class || f->isStatic) return;
+  DClass *c = (DClass *)f->parent;
+  ClassLayout *cl = sema.layoutOf(c);
+  if (!cl || !cl->polymorphic) return;
+  auto it = localSlots.find("self");
+  if (it == localSlots.end()) return;
+  llvm::Value *selfPtr = builder.CreateLoad(PointerType::get(ctx, 0), it->second);
+  builder.CreateStore(vtableFor(c), selfPtr);
 }
 
 llvm::Value *Codegen::emitDefaultValue(Type *t) {
@@ -672,8 +695,10 @@ llvm::Value *Codegen::emitLValue(Expr *e) {
     auto *m = (EMember *)e;
     if (m->memberKind != MemberKind::Field) return nullptr;
     if (m->obj->type && m->obj->type->isPtr()) {
-      llvm::Value *objPtr = emitExpr(m->obj); // auto-deref: obj is already the address
-      return objPtr;
+      // auto-deref through the pointer, then GEP to the field
+      llvm::Value *objPtr = emitExpr(m->obj);
+      unsigned idx = fieldGEPIndex(m->obj->type->pointee, m->memberIndex);
+      return builder.CreateStructGEP(structTypeFor(m->obj->type->pointee), objPtr, idx);
     }
     llvm::Value *objAddr = emitLValue(m->obj);
     if (!objAddr) return nullptr;
@@ -1163,6 +1188,22 @@ llvm::Value *Codegen::emitCall(ECall *c) {
     }
     if (m->memberKind == MemberKind::Method && m->resolvedFunc) {
       DFunc *f = (DFunc *)m->resolvedFunc;
+      if (c->baseSelfCall) {
+        // BaseName.method(args): direct call with the CURRENT self
+        llvm::Function *impl = declareFunc(f, {});
+        auto it = localSlots.find("self");
+        llvm::Value *self = nullptr;
+        if (it != localSlots.end())
+          self = builder.CreateLoad(llvmType(sema.selfTypeOf(f)), it->second);
+        else
+          self = Constant::getNullValue(PointerType::get(ctx, 0));
+        std::vector<llvm::Value *> args{self};
+        for (size_t ai = 0; ai < f->params.size(); ai++) {
+          if (ai < c->args.size()) args.push_back(emitExpr(c->args[ai]));
+          else if (f->params[ai].defVal) args.push_back(emitExpr(f->params[ai].defVal));
+        }
+        return ccall(impl, args, "call.base");
+      }
       // generic method?
       if (!f->genericParams.empty() && c->genInstance) {
         GenericInstance *gi = (GenericInstance *)c->genInstance;
@@ -1371,12 +1412,13 @@ llvm::Value *Codegen::emitCast(ECast *c) {
   case CastKind::IntToBool:
     return builder.CreateICmpNE(v, Constant::getNullValue(v->getType()));
   case CastKind::IfaceWrap: {
-    // class -> interface fat pointer: {obj, itable}
+    // class -> interface fat pointer: {object address, itable}
     DInterface *iface = (DInterface *)c->type->ifaceDecl;
     DClass *cls = (DClass *)c->e->type->decl;
-    llvm::Value *obj = emitExpr(c->e);
+    llvm::Value *obj = c->e->type->isPtr() ? emitExpr(c->e) : emitLValue(c->e);
+    if (!obj) obj = emitExpr(c->e);
     llvm::Value *it = itableFor(cls, iface);
-    llvm::Value *fat = llvm::UndefValue::get(dst);
+    llvm::Value *fat = llvm::UndefValue::get(llvmType(c->type));
     fat = builder.CreateInsertValue(fat, obj, 0);
     fat = builder.CreateInsertValue(fat, it, 1);
     return fat;
@@ -1679,6 +1721,31 @@ llvm::Value *Codegen::emitStructLit(EStructLit *sl) {
     builder.CreateStore(val, fptr);
     (void)ft;
   }
+  // classes: run the constructor after field initialization
+  if (ty->isClass()) {
+    DClass *c = (DClass *)ty->decl;
+    for (DFunc *mth : c->methods) {
+      if (mth->name == "init" && !mth->isStatic) {
+        // only when all constructor params have defaults (no args available here)
+        bool callable = true;
+        for (auto &p : mth->params)
+          if (!p.defVal) callable = false;
+        if (callable) {
+          llvm::Function *impl = declareFunc(mth, {});
+          std::vector<llvm::Value *> args{slot};
+          for (auto &p : mth->params) {
+            if (p.defVal) args.push_back(emitExpr(p.defVal));
+          }
+          ccall(impl, args, "call.init");
+        } else {
+          diag.error(sl->loc, strfmt("constructor of '%s' requires arguments",
+                                     c->name.c_str()),
+                     "allocate with alloc<T>() and call init(...) explicitly", 1);
+        }
+        break;
+      }
+    }
+  }
   return builder.CreateLoad(st, slot, "obj");
 }
 
@@ -1887,10 +1954,13 @@ void Codegen::emitStmt(Stmt *s) {
     auto *r = (SReturn *)s;
     if (r->e) {
       llvm::Value *v = emitExpr(r->e);
+      emitVptrStoreIfInit(curFuncDecl);
       builder.CreateRet(v);
     } else if (fn->getReturnType()->isVoidTy()) {
+      emitVptrStoreIfInit(curFuncDecl);
       builder.CreateRetVoid();
     } else {
+      emitVptrStoreIfInit(curFuncDecl);
       builder.CreateRet(Constant::getNullValue(fn->getReturnType()));
     }
     // unreachable continuation block for subsequent (dead) code
@@ -2026,16 +2096,13 @@ void Codegen::emitStmt(Stmt *s) {
                                                                     arrTy->arrayLen)), bodyBB, endBB);
       builder.SetInsertPoint(bodyBB);
       i = builder.CreateLoad(builder.getInt64Ty(), ivar);
-      llvm::Value *ep = builder.CreateGEP(cast<llvm::ArrayType>(llvmType(arrTy)), nullptr, {});
-      (void)ep;
-      // GEP on the loaded aggregate requires an address; re-take lvalue if possible
       llvm::Value *arrAddr = emitLValue(fi->iterable);
       if (!arrAddr) {
         auto *tmp = builder.CreateAlloca(llvmType(arrTy), nullptr, "forarr.tmp");
         builder.CreateStore(arr, tmp);
         arrAddr = tmp;
       }
-      llvm::Value *elemPtr = builder.CreateGEP(llvmType(elemTy), arrAddr,
+      llvm::Value *elemPtr = builder.CreateGEP(cast<llvm::ArrayType>(llvmType(arrTy)), arrAddr,
                                                {ConstantInt::get(builder.getInt64Ty(), 0), i});
       builder.CreateStore(builder.CreateLoad(llvmType(elemTy), elemPtr), evar);
       breakStack.push_back({endBB, stepBB});

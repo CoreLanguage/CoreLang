@@ -642,12 +642,37 @@ bool Sema::typesAssignable(Type *dst, Type *src, Expr *srcExpr, SourceLoc loc,
       b = bl ? bl->base : nullptr;
     }
   }
+  // pointer upcast: ptr<Derived> -> ptr<Base>
+  if (src->isPtr() && dst->isPtr() && src->pointee->isClass() && dst->pointee->isClass()) {
+    for (DClass *b = (DClass *)src->pointee->decl; b;) {
+      if (b == (DClass *)dst->pointee->decl) return true;
+      ClassLayout *bl = layoutOf(b);
+      b = bl ? bl->base : nullptr;
+    }
+  }
   // class -> implemented interface
   if (src->isClass() && dst->isInterface()) {
     ClassLayout *sl = layoutOf((DClass *)src->decl);
     DInterface *di = (DInterface *)dst->ifaceDecl;
     for (auto &[iff, _] : sl->interfaces)
       if (iff == di) return true;
+  }
+  // array literal with a known target type: elements check against the target's
+  // element type (enables heterogeneous-but-compatible literals)
+  if (srcExpr && srcExpr->kind == Expr::ArrayLit && dst->isArray()) {
+    auto *al = (EArrayLit *)srcExpr;
+    if (!al->repeat && (long long)al->elems.size() != dst->arrayLen) {
+      diag.error(srcExpr->loc, strfmt("array literal has %zu elements, expected %lld",
+                                      al->elems.size(), dst->arrayLen));
+      return false;
+    }
+    size_t n = al->repeat ? (size_t)dst->arrayLen : al->elems.size();
+    for (size_t i = 0; i < n; i++) {
+      Expr *el = al->elems[i < al->elems.size() ? i : 0];
+      if (!typesAssignable(dst->elem, el->type, el, el->loc, "array element")) return false;
+    }
+    al->type = dst;
+    return true;
   }
   // array -> same handled by same(); no decay
 
@@ -732,6 +757,23 @@ bool Sema::checkAll() {
       if (d->kind == Decl::Func) {
         auto *f = (DFunc *)d;
         if (f->parent == nullptr && f->genericParams.empty()) checkFuncDecl(f, {});
+      } else if (d->kind == Decl::Class) {
+        for (DFunc *mth : ((DClass *)d)->methods)
+          if (mth->genericParams.empty()) checkFuncDecl(mth, {});
+      } else if (d->kind == Decl::Struct) {
+        for (DFunc *mth : ((DStruct *)d)->methods)
+          if (mth->genericParams.empty()) checkFuncDecl(mth, {});
+      } else if (d->kind == Decl::Interface || d->kind == Decl::Trait) {
+        for (DFunc *mth : ((DInterface *)d)->methods)
+          if (mth->genericParams.empty() && mth->body) checkFuncDecl(mth, {});
+      } else if (d->kind == Decl::Global) {
+        auto *g = (DGlobal *)d;
+        if (g->type) resolveType(g->type);
+        if (g->init) checkExpr(g->init);
+      } else if (d->kind == Decl::Const) {
+        auto *c = (DConst *)d;
+        if (c->type) resolveType(c->type);
+        if (c->init) checkExpr(c->init);
       }
     }
   }
@@ -769,8 +811,8 @@ void Sema::checkFuncDecl(DFunc *f, std::map<std::string, Type *> genericSubst) {
     }
   }
 
-  // implicit self for instance methods
-  if (f->parent && !f->isStatic && f->name != "init" && f->parent->kind != Decl::Interface &&
+  // implicit self for instance methods (including constructors)
+  if (f->parent && !f->isStatic && f->parent->kind != Decl::Interface &&
       f->parent->kind != Decl::Trait) {
     Type *selfTy = selfTypeOf(f);
     if (selfTy) {
@@ -1385,7 +1427,8 @@ void Sema::checkExpr(Expr *e, bool lvalue) {
       for (auto it = chain.rbegin(); it != chain.rend(); ++it)
         for (auto &f : (*it)->fields) fieldList.push_back({f.name, f.type});
     }
-    if (sl->fields.size() != fieldList.size()) {
+    bool isClassLit = ty->isClass(); // classes construct via init(): fields optional
+    if (!isClassLit && sl->fields.size() != fieldList.size()) {
       diag.error(e->loc, strfmt("'%s' literal requires all %zu fields, got %zu",
                                 typeToString(ty).c_str(), fieldList.size(), sl->fields.size()));
       return;
@@ -1436,10 +1479,50 @@ void Sema::checkExpr(Expr *e, bool lvalue) {
     }
     for (auto *el : al->elems) checkExpr(el);
     Type *elem = al->elems[0]->type;
+    bool allFit = true;
     for (size_t ei = 1; ei < al->elems.size(); ei++) {
-      if (!typesAssignable(elem, al->elems[ei]->type, al->elems[ei], al->elems[ei]->loc, "array element"))
+      Type *et = al->elems[ei]->type;
+      if (!et || !elem) { allFit = false; continue; }
+      if (tc.same(elem, et)) continue;
+      // least-upper-bound for (ptr-to-)class hierarchies: widen to the common base
+      Type *widen = nullptr;
+      bool viaPtr = elem->isPtr() && et->isPtr();
+      Type *elemBase = viaPtr ? elem->pointee : elem;
+      Type *etBase = viaPtr ? et->pointee : et;
+      if (etBase->isClass() && elemBase->isClass()) {
+        for (DClass *b = (DClass *)etBase->decl; b && !widen;) {
+          Type *bt = tc.getClass(b, {});
+          bool all = true;
+          for (size_t ej = 0; ej < al->elems.size(); ej++) {
+            Type *tj0 = al->elems[ej]->type;
+            if (!tj0) { all = false; break; }
+            Type *tj = viaPtr && tj0->isPtr() ? tj0->pointee : tj0;
+            if (!tj || !(tc.same(tj, bt) || tj->isClass())) { all = false; break; }
+            if (tc.same(tj, bt)) continue;
+            bool up = false;
+            for (DClass *b2 = (DClass *)tj->decl; b2;) {
+              if (b2 == (DClass *)bt->decl) { up = true; break; }
+              ClassLayout *bl = layoutOf(b2);
+              b2 = bl ? bl->base : nullptr;
+            }
+            if (!up) { all = false; break; }
+          }
+          if (all) {
+            widen = viaPtr ? tc.ptr(bt) : bt;
+          } else {
+            ClassLayout *bl = layoutOf(b);
+            b = bl ? bl->base : nullptr;
+          }
+        }
+      }
+      if (widen) {
+        elem = widen;
+      } else if (!typesAssignable(elem, et, al->elems[ei], al->elems[ei]->loc, "array element")) {
+        allFit = false;
         return;
+      }
     }
+    (void)allFit;
     e->type = tc.array(elem, (long long)al->elems.size());
     return;
   }
@@ -2252,8 +2335,10 @@ Type *Sema::checkCall(ECall *call) {
       if (derefTy->isClass() || derefTy->isStruct()) {
         name = m->name;
         if (derefTy->isClass()) {
+          // most-derived overload set wins: walk the chain and stop at the
+          // first class that declares the name
           DClass *c = (DClass *)derefTy->decl;
-          for (DClass *cc = c; cc;) {
+          for (DClass *cc = c; cc && candidates.empty();) {
             for (DFunc *mth : cc->methods)
               if (mth->name == name) candidates.push_back(mth);
             ClassLayout *cl = layoutOf(cc);
@@ -2299,16 +2384,45 @@ Type *Sema::checkCall(ECall *call) {
         Decl *td = (Decl *)id->target;
         if (td->kind == Decl::Enum) return checkVariantCtor(call, (DEnum *)td, m->name);
         if (td->kind == Decl::Class || td->kind == Decl::Struct) {
+          std::string typeName = td->kind == Decl::Class ? ((DClass *)td)->name
+                                                         : ((DStruct *)td)->name;
           std::vector<DFunc *> mths = td->kind == Decl::Class
                                           ? std::vector<DFunc *>(((DClass *)td)->methods)
                                           : std::vector<DFunc *>(((DStruct *)td)->methods);
+          // static methods...
           for (DFunc *f : mths)
             if (f->name == m->name && f->isStatic) candidates.push_back(f);
+          // ...or base-class method calls with implicit self (super-style)
+          if (candidates.empty() && td->kind == Decl::Class && curFunc && curFunc->parent) {
+            Decl *myType = curFunc->parent;
+            bool derives = false;
+            if (myType->kind == Decl::Class) {
+              for (DClass *b = (DClass *)myType; b && !derives;) {
+                if (b == (DClass *)td) derives = true;
+                ClassLayout *bl = layoutOf(b);
+                b = bl ? bl->base : nullptr;
+              }
+            }
+            if (derives) {
+              for (DFunc *f : mths)
+                if (f->name == m->name && !f->isStatic) candidates.push_back(f);
+              if (!candidates.empty()) {
+                call->memberKind = MemberKind::Method;   // self comes from the caller
+                m->memberKind = MemberKind::Method;
+                m->name = m->name; // keep
+                name = m->name;
+                call->baseSelfCall = true;
+                m->obj = new ESelf(call->loc); // self
+                checkExpr(m->obj);
+                m->memberKind = MemberKind::Method;
+              }
+            }
+          }
           name = m->name;
           if (candidates.empty()) {
             diag.error(call->loc, strfmt("no static method '%s' on type '%s'", m->name.c_str(),
-                                         (td->kind == Decl::Class ? ((DClass *)td)->name
-                                                                  : ((DStruct *)td)->name).c_str()));
+                                         typeName.c_str()),
+                               td->kind == Decl::Class ? "constructors run through `Type { ... }` literals or a subclass init calling `Base.init(...)`" : "");
             return nullptr;
           }
         } else {
@@ -2331,13 +2445,14 @@ Type *Sema::checkCall(ECall *call) {
   DFunc *chosen = resolveOverload(candidates, call->args, call->loc, name, ok);
   if (!ok || !chosen) return nullptr;
   call->resolvedFunc = chosen;
-  // annotate the callee ident so codegen finds the implementation
+  // annotate the callee so codegen finds the implementation
   if (callee->kind == Expr::Ident) {
     auto *id = (EIdent *)callee;
     id->idKind = IdKind::Func;
     id->resolvedFunc = chosen;
-  } else if (callee->kind == Expr::Member && callee->type == nullptr) {
-    // module-qualified/static callees already carry memberKind
+  } else if (callee->kind == Expr::Member) {
+    auto *m = (EMember *)callee;
+    m->resolvedFunc = chosen;
   }
 
   // generic instantiation
@@ -2948,6 +3063,16 @@ DFunc *Sema::resolveOverload(const std::vector<DFunc *> &cands, const std::vecto
         for (auto &[iff, _] : sl->interfaces)
           if (iff == (DInterface *)want->ifaceDecl) impl = true;
         if (impl) { score = std::min(score, 1); continue; }
+      }
+      // ptr<Derived> -> ptr<Base>
+      if (got->isPtr() && want->isPtr() && got->pointee->isClass() && want->pointee->isClass()) {
+        bool up = false;
+        for (DClass *b = (DClass *)got->pointee->decl; b;) {
+          if (b == (DClass *)want->pointee->decl) { up = true; break; }
+          ClassLayout *bl = layoutOf(b);
+          b = bl ? bl->base : nullptr;
+        }
+        if (up) { score = std::min(score, 1); continue; }
       }
       matches = false;
       break;

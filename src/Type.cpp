@@ -66,9 +66,27 @@ std::string typeToString(Type *t) {
     if (t->ret && !t->ret->isVoid()) s += " -> " + typeToString(t->ret);
     return s;
   }
-  case TypeKind::Struct: {
-    std::string s = t->genericVarName.empty() ? "struct" : t->genericVarName;
-    return s;
+  case TypeKind::Struct: case TypeKind::Class: case TypeKind::Enum: {
+    Decl *d = (Decl *)t->decl;
+    std::string n = "type";
+    if (d->kind == Decl::Struct) n = ((DStruct *)d)->name;
+    else if (d->kind == Decl::Class) n = ((DClass *)d)->name;
+    else n = ((DEnum *)d)->name;
+    if (!t->genericArgs.empty()) {
+      n += "<";
+      for (size_t i = 0; i < t->genericArgs.size(); i++) {
+        if (i) n += ", ";
+        n += typeToString(t->genericArgs[i]);
+      }
+      n += ">";
+    }
+    return n;
+  }
+  case TypeKind::Interface: {
+    Decl *d = (Decl *)t->ifaceDecl;
+    return d && (d->kind == Decl::Interface || d->kind == Decl::Trait)
+               ? ((DInterface *)d)->name
+               : std::string("interface");
   }
   default: return "<type>";
   }

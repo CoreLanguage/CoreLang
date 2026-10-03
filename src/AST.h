@@ -88,6 +88,7 @@ struct Expr {
   int binKind = 0;                // BinKind
   int unKind = 0;                 // UnKind
   bool checkBounds = true;        // EIndex bounds check
+  bool baseSelfCall = false;      // ECall: BaseName.method(...) takes current self
   void *scopeId = nullptr;        // Scope* where an EIdent local resolved
   explicit Expr(Kind k, SourceLoc l) : kind(k), loc(l) {}
   virtual ~Expr() = default;

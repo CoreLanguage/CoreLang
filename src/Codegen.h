@@ -74,6 +74,7 @@ private:
   llvm::Value *emitBuiltinCall(ECall *c, Builtin b, const std::string &name);
   llvm::Value *emitVariantCtor(ECall *c);
   llvm::Value *emitSelfArg(Expr *obj);
+  void emitVptrStoreIfInit(DFunc *f);
   llvm::CallInst *ccall(llvm::FunctionCallee callee, llvm::ArrayRef<llvm::Value *> args,
                         const std::string &name);
   llvm::CallInst *ccall(llvm::FunctionType *fty, llvm::Value *callee,
