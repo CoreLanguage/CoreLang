@@ -78,8 +78,7 @@ bool Driver::loadModule(const std::string &path, std::vector<std::string> &chain
   std::string canon = real ? real : path;
   if (real) free(real);
 
-  if (byCanonicalPath.count(canon)) return true; // deduplicated imports
-
+  // circular imports: the module being loaded appears again in the active chain
   for (auto &c : chain) {
     if (c == canon) {
       std::string cycle;
@@ -89,6 +88,8 @@ bool Driver::loadModule(const std::string &path, std::vector<std::string> &chain
       return false;
     }
   }
+  if (byCanonicalPath.count(canon)) return true; // deduplicated imports
+
   chain.push_back(canon);
 
   bool ok;
@@ -249,10 +250,11 @@ int runPipelineInternal(Driver &driver, const std::string &outputName, const std
         : opts.optLevel == 3 ? llvm::OptimizationLevel::O3
         : llvm::OptimizationLevel::O0;
     llvm::PassBuilder pb;
-    llvm::ModuleAnalysisManager mam;
-    llvm::CGSCCAnalysisManager cam;
-    llvm::FunctionAnalysisManager fam;
+    // declaration order = destruction order (top-level manager dies first)
     llvm::LoopAnalysisManager lam;
+    llvm::FunctionAnalysisManager fam;
+    llvm::CGSCCAnalysisManager cam;
+    llvm::ModuleAnalysisManager mam;
     pb.registerModuleAnalyses(mam);
     pb.registerFunctionAnalyses(fam);
     pb.registerCGSCCAnalyses(cam);

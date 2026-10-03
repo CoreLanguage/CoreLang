@@ -415,7 +415,7 @@ static bool setupProjectDriver(DriverOptions &opts, Manifest &m, Diagnostics &di
     for (auto &la : m.linkArgs) opts.linkArgs.push_back(la);
   }
   for (auto &l : m.link) opts.linkLibs.push_back(l);
-  opts.stdDir = dirName(findCompilerData("prelude.cr", opts));
+  opts.stdDir = dirName(findCompilerData("std/prelude.cr", opts));
   opts.runtimeObj = findCompilerData("corert.o", opts);
   return true;
 }

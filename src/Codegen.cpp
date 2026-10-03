@@ -450,6 +450,19 @@ bool Codegen::generate(llvm::Module &module, ModuleSema *entryModule) {
     dib = std::make_unique<llvm::DIBuilder>(*mod);
     dbg = dib.get();
     dbgEnabled = true;
+    // one compile unit per source file
+    for (size_t fi = 0; fi < sema.diag.sm.fileCount(); fi++) {
+      std::string path = sema.diag.sm.fileName((unsigned)fi);
+      std::string dir = ".", name = path;
+      size_t slash = path.find_last_of('/');
+      if (slash != std::string::npos) {
+        dir = path.substr(0, slash);
+        name = path.substr(slash + 1);
+      }
+      llvm::DIFile *dif = dbg->createFile(name, dir);
+      llvm::DICompileUnit *cu = dbg->createCompileUnit(llvm::dwarf::DW_LANG_C, dif, "core", false, "", 0);
+      debugCUs()[(unsigned)fi] = cu;
+    }
   }
 
   // 1. declare everything: globals, functions, methods (prelude first)
@@ -557,27 +570,18 @@ void Codegen::emitFuncBody(DFunc *f, const std::vector<Type *> &genericArgs) {
   if (dbgEnabled) {
     unsigned fid = f->loc.valid ? f->loc.file : 0;
     auto &cuMap = debugCUs();
-    llvm::DIFile *dif = nullptr;
-    if (cuMap.count(fid)) dif = (llvm::DIFile *)cuMap[fid];
-    else {
-      std::string path = sema.diag.sm.fileName(fid);
-      std::string dir = ".", name = path;
-      size_t slash = path.find_last_of('/');
-      if (slash != std::string::npos) {
-        dir = path.substr(0, slash);
-        name = path.substr(slash + 1);
-      }
-      dif = dbg->createFile(name, dir);
-      cuMap[fid] = dif;
-    }
+    llvm::DICompileUnit *cu = nullptr;
+    if (cuMap.count(fid)) cu = (llvm::DICompileUnit *)cuMap[fid];
+    if (!cu) cu = (llvm::DICompileUnit *)cuMap[0];
     llvm::DISubroutineType *fty = dbg->createSubroutineType(dbg->getOrCreateTypeArray({}));
-    curSP = dbg->createFunction(dif, f->name, sym, dif,
+    curSP = dbg->createFunction(cu, f->name, sym, cu->getFile(),
                                 (unsigned)(f->loc.line ? f->loc.line : 1), fty,
                                 0, llvm::DINode::FlagZero, llvm::DISubprogram::SPFlagDefinition);
-    fn->setSubprogram(curSP);
+    fnp->setSubprogram(curSP);
   }
 
   llvm::BasicBlock *entry = llvm::BasicBlock::Create(ctx, "entry", fnp);
+  builder.SetCurrentDebugLocation(llvm::DebugLoc()); // clear stale locations
   builder.SetInsertPoint(entry);
 
   // bind params to allocas
