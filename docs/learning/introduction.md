@@ -100,4 +100,22 @@ Core is young. Things it deliberately does **not** have yet:
 - Whole-program compilation — no separate object caching, so big projects recompile fully
 - Cross builds (`--target=aarch64`, `--target=riscv64`) stop at object files; linking needs a target toolchain
 
+## Common mistakes
+
+- Expecting a package manager, REPL, or interpreter — Core is compile-from-source, and the only runtime artifact is your binary.
+- Comparing Core to Python-style dynamism: there is no truthiness, no implicit conversion, no reflection. Types and errors are explicit by design.
+- Skipping the build: Core is a compiled toolchain; the "install" is a `cmake` build (next chapter).
+
+## Performance notes
+
+- Core's optimizer is LLVM's, so idiomatic straightforward code usually compiles to the same machine code as hand-tuned C — measure before contorting your design.
+- The whole-program compilation model trades incremental builds for full cross-module optimization.
+
+## Exercises
+
+1. Build Core from source (next chapter) and run the hello program above.
+2. Compile any example from `examples/` and run `core emit-asm` on its source — find your string literal in the assembly output.
+3. Compile the same program at `-O0` and `-Os` and compare the binary sizes.
+4. Skim `docs/LANGUAGE-REFERENCE-SUMMARY.md` and list three features Core deliberately does *not* have; write a sentence on why each might be a deliberate choice.
+
 Next: [Installation](installation.md).

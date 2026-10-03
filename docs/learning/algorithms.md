@@ -259,4 +259,12 @@ Verified output: `1 3 7 9 19 23 42 56 71 88`, `5`, `-1`, `0 1 2 3 4`, `0 1 3 2 4
 - Don't hand-roll hash tables or sorts in application code if a simple O(n log n) sort + linear scan suffices — see [data-structures.md](data-structures.md) for reusable shapes.
 - For numeric bulk work, consider SIMD vectors from the `simd` module (lane-wise `+ - * /`) before writing clever scalar code.
 
+## Exercises
+
+1. Write insertion sort over a `[i32; 8]` and verify it matches `bubble`'s output on the same data.
+2. Write `linear_search(arr: ptr<i32>, n: i32, key: i32) -> Option<i32>` — return the first index or `None`.
+3. Write a recursive `array_sum(arr: ptr<i32>, n: i32) -> i64` (split in half) and compare with a loop version.
+4. Change BFS to return `bool reachable(target)`: stop early when the target is dequeued.
+5. Adapt `binary_search` for a **descending** array (invert the comparisons) and test on reversed sorted data.
+
 Next: [Modules](modules.md).

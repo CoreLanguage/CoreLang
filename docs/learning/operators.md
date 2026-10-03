@@ -165,4 +165,12 @@ func main() {
 - Avoid clever bitwise arithmetic in non-hot code — the readable version optimizes just as well.
 - Don't use `as` to silence every type error; a cast that changes width or signedness deserves a comment.
 
+## Exercises
+
+1. Write `is_even(n: i32) -> bool` using `%`, then a version using `& 1` — confirm they agree for 0, 7, -2.
+2. Swap two integers without a temporary, using `^=` three times; print both before and after.
+3. Predict the values of `2 + 3 * 4 % 5`, `1 << 3 >> 2`, and `10 & 6 ^ 12 | 5` on paper, then verify with a program.
+4. Write `lowest_bit(n: i32) -> i32` returning the value of the lowest set bit (`n & -n`) — test at 12 (4) and 10 (2).
+5. Demonstrate that `as` truncates toward zero: cast `-3.9` and `3.9` to `i32` and print both.
+
 Next: [Control flow](control-flow.md).

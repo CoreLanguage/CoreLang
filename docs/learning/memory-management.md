@@ -179,4 +179,12 @@ The arena program above is complete — compile with `core compile arena arena.c
 - **Don't** allocate in tight loops without reuse; hoist the buffer out.
 - **Don't** build "smart pointer" emulations; keep ownership boring and explicit.
 
+## Exercises
+
+1. Allocate an `i32`, write through it, print, and free — then set the pointer to `null` and confirm your `free` helper skips it.
+2. Grow a heap buffer from 4 to 100 elements with `realloc_array` in a loop, writing every element, and free once at the end.
+3. Build the `Bump` arena from this page, allocate 100 `i32`s from it, `reset()`, allocate again — verify the second batch reads correctly.
+4. Allocate two `Point`s with `alloc` (uninitialized) and `alloc_zeroed`, print all fields, and explain the difference in a comment.
+5. Write a `Pair_free(a: ptr<Node>, b: ptr<Node>)` helper that frees in reverse allocation order and nulls both — then misuse it (double-free) in a comment-only block, explaining what UB would occur.
+
 Next: [Classes](classes.md).

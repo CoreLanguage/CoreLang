@@ -181,4 +181,12 @@ func main() {
 - **Don't** expose unsafe APIs in library interfaces — wrap them; your users' code should contain zero unsafe.
 - When the goal is assembly specifically, go straight to [inline-assembly.md](inline-assembly.md); for hardware access patterns, [low-level-programming.md](low-level-programming.md).
 
+## Exercises
+
+1. Reinterpret an `i32` as a `ptr<u8>` view and print all 4 bytes for `0x12345678` — confirm the little-endian order.
+2. Write `checked_get(xs: ptr<i32>, n: i32, i: i32) -> i32` that asserts the range *outside* unsafe and indexes *inside* unsafe — document the invariant in a comment.
+3. Do a `volatile_store`/`volatile_load` round trip on a local variable and print the value.
+4. Round-trip an address: cast `0x2000` to `ptr<u8>` and back to `u64`, confirming equality.
+5. Run `grep -rn "unsafe" src/` in a project and annotate each hit with the invariant that makes it valid.
+
 Next: [Inline assembly](inline-assembly.md).

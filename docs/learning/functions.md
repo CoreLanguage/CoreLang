@@ -224,4 +224,12 @@ func early() -> i32 { return 1; return 2 }
 - Don't reach for function values as a substitute for `switch`/`match` — v0.1's function-value support is best kept to simple "pass a lambda to a worker/map" patterns.
 - Prefer pointer parameters for big structs you'd otherwise copy; see [references.md](references.md).
 
+## Exercises
+
+1. Write `is_prime(n: i32) -> bool` and print all primes below 50 using it.
+2. Write `power(base: i32, exp: i32 = 2)` — a function with a default argument — and call it both ways.
+3. Write a recursive `gcd(a: i32, b: i32) -> i32`; verify `gcd(48, 18)` is 6.
+4. Write `map_in_place(arr: ptr<i32>, n: i32, f: func(i32) -> i32)` and double an array through a lambda.
+5. Write `divmod(a: i32, b: i32, rem: ptr<i32>) -> i32` (out-parameter) — remember parameters are immutable copies; the pointer is the point.
+
 Next: [Arrays](arrays.md).

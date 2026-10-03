@@ -44,6 +44,8 @@ Packed structs can be **misaligned** in arrays (element size 5 sits at odd offse
 Structs can declare methods. Inside a method, `self` refers to the value — field access and method calls on `self` auto-deref, so it behaves like a pointer to the struct:
 
 ```core
+import math
+
 struct Vec2 {
     x: f64
     y: f64
@@ -171,5 +173,13 @@ func main() {
 - **Use structs** for data: vectors, records, configuration, C-ABI boundaries, buffers with a length field.
 - **Use classes** when you need inheritance, virtual dispatch, or private-by-default encapsulation.
 - **Don't** use `@packed` "just in case" — natural alignment is faster; pack only when the format demands it.
+
+## Exercises
+
+1. Write a `Rect` struct (`x, y, w, h: i32`) with an `area` method and a free function `contains(r: Rect, px: i32, py: i32) -> bool`.
+2. Build `Triangle { a: Vec2, b: Vec2, c: Vec2 }` and compute its area with the cross-product formula in a method.
+3. Predict `sizeof`/`alignof` of a struct with `u8, u32, u8` fields, then verify — and again with `@packed`.
+4. Define a `@packed PacketHeader` (magic: u16, len: u32, flags: u8), serialize one into a `[u8; 7]` buffer with shifts, and read a field back.
+5. Write `grow(v: ptr<Vec2>, factor: f64)` that scales both fields through the pointer, and confirm the caller sees the change.
 
 Next: [Pointers](pointers.md).

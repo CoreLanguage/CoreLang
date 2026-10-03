@@ -254,4 +254,12 @@ The four programs above are complete and verified. A single-file kitchen-sink ve
 - If your data structure needs **polymorphic elements**, store data-carrying [enums](enums.md) or interface fat pointers ([oop.md](oop.md)).
 - For shared/mutable structures across threads: wrap access in a `Mutex` (see [concurrency.md](concurrency.md)) — no structure is thread-safe by itself.
 
+## Exercises
+
+1. Add `list_pop(l: ptr<List>) -> i32` (returns 0 when empty, decrementing len) to the List above.
+2. Use the Stack to check balanced parentheses in a string: push on `(`, pop on `)`, assert empty at the end.
+3. Add `map_has(m: ptr<HashMap>, key: string) -> bool` — the lookup loop without the return value.
+4. Fill the ring `Queue` to capacity (16), confirm `push` returns `false`, pop three, push three more — verify wraparound order.
+5. Allocate a List whose backing store comes from the `Bump` arena instead of `alloc_array` — same push loop, `arena.reset()` at the end.
+
 Next: [Algorithms](algorithms.md).

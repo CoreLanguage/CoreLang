@@ -137,6 +137,11 @@ There's none built in — no `shared_ptr`, no GC. The owning party is whoever al
 ```core
 import memory
 
+struct Node {
+    value: i32
+    next: ptr<Node>
+}
+
 // owner: main. borrower: print_node — borrows, never frees.
 func print_node(n: ptr<Node>) {
     if n == null { return }
@@ -214,5 +219,13 @@ func main() {
 - **Values** for small data, return-by-value APIs, and anything that shouldn't be shared.
 - **Pointers** for mutation, big data, linked structures, and shared state with a single owner.
 - If you miss borrow checking: keep borrows short, never free through a borrower, and consider asserting invariants with `assert` (see [error-handling.md](error-handling.md)).
+
+## Exercises
+
+1. Write `bump_copy(c: Counter)` and `bump_shared(c: ptr<Counter>)` for a `Counter` struct; call each twice and print the field to show the difference.
+2. Write `minmax(a: [i32; 5]) -> MinMax` returning a struct with both extremes.
+3. Return multiple values from `parse_rgb(hex: u32, out: ptr<Color>)` — a return plus an out-param.
+4. Define a 4-field struct, pass it by value and by pointer to functions that read all fields, and time 100k iterations of each with `time.monotonic_ms()` (import `time`).
+5. Copy an array into a second binding, mutate the copy, and print the original — then explain in a comment why the same doesn't apply to `ptr`-shared data.
 
 Next: [Memory management](memory-management.md).

@@ -202,4 +202,12 @@ func main() {
 - Money, physics, averages: `f64` unless you need `f32` for SIMD width.
 - State machines, tagged unions: `enum` (see [enums.md](enums.md)).
 
+## Exercises
+
+1. Declare one variable of every integer primitive and print it, then print `sizeof` of each — check the table above.
+2. Show that `say 7 / 2` is `3` but `say 7 as f64 / 2.0` is `3.5`; explain both results in a comment.
+3. Write a function `clamp_u8(v: i32) -> u8` that returns 0 or 255 for out-of-range inputs and the value otherwise (casts + comparisons only).
+4. Try to initialize `small: i8 = 200` and read the compile error; then write the cast that documents the truncation explicitly.
+5. Use `len()` on two different strings and add the results to a `usize` total.
+
 Next: [Operators](operators.md).

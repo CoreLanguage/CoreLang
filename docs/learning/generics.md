@@ -180,4 +180,12 @@ func main() {
 - **Don't** try to emulate Haskell/Rust-style type classes — Core v1 generics are just parameterized code.
 - For heterogeneous collections, see [oop.md](oop.md) (interface fat pointers) — or store a tagged enum (see [enums.md](enums.md)).
 
+## Exercises
+
+1. Write generic `min<T>` alongside `max<T>` and test both on `i32`, `f64`, and `char`.
+2. Use `swap<T>` from this page on an `i32` pair and a `string` pair.
+3. Write `first_of<T>(b: Box<T>) -> T` and use it on `Box<i32>` and `Box<string>`.
+4. Write `contains<T>(arr: ptr<T>, n: i32, key: T) -> bool` — note in a comment what operations `T` must support (no bounds!).
+5. Declare a `ptr<Box<i32> >` variable (mind the space), point it at a local Box, and mutate through it — then try the `>>` spelling and read the parse error.
+
 Next: [Enums](enums.md).

@@ -153,4 +153,12 @@ core test      # no tests found (add tests/*.cr)
 - **Bare `core compile`** for one-file experiments and learning (like most examples in these tutorials).
 - Put demos in `examples/` with their own structure only if they're standalone teaching material — the compiler only builds `src/main.cr` via `core build`.
 
+## Exercises
+
+1. Run the init → build → run flow of the complete example, then rename the project in `core.toml` and confirm the new binary name.
+2. Add a deliberately failing assert to a `tests/*.cr` file and run `core test` — read the failure output, then fix it.
+3. Compile with `-O0` and `-Os` and compare binary sizes; add both invocations as comments in your README.
+4. Use `core check` while introducing a type error (`say "age: " + 42`) and confirm no binary is produced.
+5. Create a `.gitignore` covering the binary, `*.coreobj.o`, and `core_test_*` artifacts.
+
 Next: [Packages](packages.md).

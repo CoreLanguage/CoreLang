@@ -102,6 +102,11 @@ Any pointer converts to `ptr<void>` and back; casts between different pointee ty
 ```core
 import memory
 
+struct Node {
+    value: i32
+    next: ptr<Node>
+}
+
 func main() {
     raw: ptr<void> = alloc<Node>()        // any ptr<T> -> ptr<void> implicitly
     typed = unsafe { raw as ptr<Node> }   // back with unsafe
@@ -206,5 +211,13 @@ func main() {
 - **Prefer values** (structs, arrays) for small, short-lived data — they're stack-friendly and copy-cheap.
 - **Never** store raw pointers in interfaces that outlive their allocation without documenting who frees.
 - If you're reaching for pointers to share mutable state between functions, first read [references.md](references.md) — and for concurrency, [concurrency.md](concurrency.md).
+
+## Exercises
+
+1. Write `swap(x: ptr<i32>, y: ptr<i32>)` and use it on two locals.
+2. Sum an array using only pointer arithmetic (`p = &data[0]`, `p += 1`, `*p`) — no `[i]` indexing.
+3. Build a 3-node linked list with `alloc<Node>`, print the values by following `next`, then free in reverse order.
+4. Write `set_through(pp: ptr<ptr<i32>>, v: i32)` that assigns `**pp = v`, and use it to change a local.
+5. After freeing a pointer, set it to `null` and write a helper `safe_get(p: ptr<i32>) -> i32` that returns 0 for `null` — verify both paths.
 
 Next: [References](references.md).

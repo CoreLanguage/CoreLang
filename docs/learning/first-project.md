@@ -73,10 +73,10 @@ Replace `src/main.cr`:
 
 ```core
 // src/main.cr - the demo program
-import math
+const PI: f64 = 3.14159265358979
 
 func area(r: f64) -> f64 {
-    return math.PI * r * r
+    return PI * r * r
 }
 
 func main() {
@@ -100,7 +100,12 @@ radius 2 -> area 12.56637
 Add a test in `tests/test_area.cr`:
 
 ```core
-import math
+// tests/test_area.cr
+const PI: f64 = 3.14159265358979
+
+func area(r: f64) -> f64 {
+    return PI * r * r
+}
 
 func test_area() {
     assert(area(1.0) > 3.14, "unit circle area")
@@ -112,6 +117,8 @@ func main() {
     say "tests ok"
 }
 ```
+
+(Here the test file redefines `area` — test files are separate programs; see the v0.1 testing notes below.)
 
 ```bash
 $ core test

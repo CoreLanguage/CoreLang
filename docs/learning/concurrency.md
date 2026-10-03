@@ -193,4 +193,12 @@ Verified: prints `10000` then `flag set`.
 - **Don't** build actor frameworks or async runtimes — Core gives you the primitives; keep architectures simple.
 - Single-threaded deterministic code is easier to debug — reach for threads only with a parallelism-shaped problem.
 
+## Exercises
+
+1. Spawn two threads that each write their own result slot (`results[i]` for distinct `i`), join, and print both — no locks needed; explain why in a comment.
+2. Drive an `AtomicI32` from 4 threads × 10,000 `add(1)` and verify exactly 40,000.
+3. Protect a two-field struct (`min`, `max`) with a `Mutex`, updating both from several threads — the lock guarantees they stay consistent.
+4. Spawn a thread capturing a `mut` local **by value**, mutate the local after spawning, and print what the thread saw — then rewrite with the pointer-sharing pattern and explain the difference.
+5. Write a CAS loop that increments an atomic counter only while it is below 10; run it from two threads and confirm it never exceeds 10.
+
 Next: [FFI](ffi.md).

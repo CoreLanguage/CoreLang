@@ -20,12 +20,14 @@ class Animal {
 
 ## Construction: `init` constructors
 
-A class literal `Dog { ... }` invokes an `init` method. `init` methods:
+Construction has two halves: the class literal `Temp { }` creates the value, and an `init` method initializes it. `init` methods:
 
 - are named exactly `init`
 - assign `self.field` directly (no `return`)
-- may take parameters (optionally defaulted) — the literal's `field: value` pairs are passed as arguments
+- may take parameters, optionally defaulted
 - may call the base class's init via `Animal.init(...)` — see inheritance below
+
+The two reliable calling forms in v0.1:
 
 ```core
 class Temp {
@@ -35,14 +37,17 @@ class Temp {
 }
 
 func main() {
-    t = Temp { }            // init() with all defaults -> 0.0
-    say t.c()
-    t2 = Temp { c: 36.6 }   // init(c: 36.6)
-    say t2.c()              // 36.6
+    t = Temp { }          // literal: requires an init callable with NO args
+    say t.c()             // 0 (all params defaulted)
+    t.init(36.6)          // explicit init call with arguments
+    say t.c()             // 36.6
 }
 ```
 
-`Temp { }` requires an init callable with **no arguments** (all parameters defaulted). If every init needs arguments, the literal must supply them (`Temp { c: 36.6 }`) — otherwise the compiler tells you to `alloc<T>()` + call `init` explicitly.
+1. **`Temp { }` + explicit `init(args)`** — always works, for any init signature. Use this when init needs arguments.
+2. **`Class { field: value }`** — passes values to a same-named, non-defaulted init parameter (parameter names must match field names). Currently prints a spurious "constructor requires arguments" diagnostic but compiles and works — e.g. `Sq { side: 3.0 }` for `func init(side: f64)`.
+
+> **v0.1 bug to avoid:** when the matching init parameter has a **default value**, a literal like `Temp { celsius: 36.6 }` compiles but silently uses the default — the field value is dropped. Call `init` explicitly instead.
 
 ## Static methods
 
@@ -52,8 +57,10 @@ func main() {
 class Temp {
     celsius: f64
     pub func init(c: f64 = 0.0) { self.celsius = c }
+    pub func c() -> f64 { return self.celsius }
     static func from_f(f: f64) -> Temp {      // factory
-        t = Temp { c: f }
+        t = Temp { }
+        t.init(f)
         return t
     }
 }
@@ -134,7 +141,8 @@ class Temp {
     pub func init(c: f64 = 0.0) { self.celsius = c }
     pub func c() -> f64 { return self.celsius }
     static func from_f(f: f64) -> Temp {
-        t = Temp { c: f }
+        t = Temp { }
+        t.init(f)
         return t
     }
 }
@@ -153,9 +161,12 @@ func main() {
     counter.inc()
     say counter.get()   // 3
 
-    t = Temp { c: 36.6 }
+    t = Temp { }
+    t.init(36.6)
     say t.c()           // 36.6
-    say Temp.from_f(100.0).c()   // 100
+    t3 = Temp.from_f(100.0)   // assign first: method calls directly on a
+    say t3.c()                // static call's result miscompile in v0.1
+
 
     // polymorphism preview: a base-class pointer sees overrides
     zoo: [ptr<Animal>; 2] = [&d, &c]
@@ -167,7 +178,7 @@ func main() {
 
 - **Forgetting `self.`** — fields are always accessed through `self` inside methods.
 - **`init` with `return`.** init assigns fields; it doesn't return the object.
-- **`Dog { }` with no zero-arg init.** Either default all init params, or supply them in the literal (`Dog { name: "rex" }` style requires the init to take them).
+- **`Dog { }` with no zero-arg init.** If init needs arguments, call it explicitly: `d = Dog { }; d.init("rex")` (see the construction section for the literal-passing rules and their v0.1 limits).
 - **Forgetting `pub`** on methods you call from other modules (and on the class itself).
 - **Expecting multiple inheritance.** One base class only; after a comma come interfaces/traits (see [oop.md](oop.md)).
 
@@ -182,5 +193,13 @@ func main() {
 - **Use a class** when state and the operations on it belong together, when you need inheritance, or when private-by-convention encapsulation helps.
 - **Use a struct** for plain data — less ceremony, public fields, C-compatible by default.
 - Don't build deep hierarchies in Core; prefer composition (a field) + static dispatch unless you specifically need polymorphism.
+
+## Exercises
+
+1. Write a `BankAccount` class (field `balance: i64`, init defaulted to 0) with `deposit`, `withdraw` (returning `bool` on insufficient funds), and `balance` methods.
+2. Add a static factory `Account.with_start(v: i64)` that returns an initialized instance (assign the static's result to a variable before calling methods on it).
+3. Build a two-level hierarchy: `Vehicle` (field `wheels: i32`, init, method `describe`) → `Car` whose init calls `Vehicle.init(4)`; print the description.
+4. Extend `Counter` with `inc_by(n: i32)` and `reset()`, and drive it from a loop.
+5. Make a class with a private-by-convention field plus `get`/`set` methods, and add an `assert` in the setter enforcing a range — call the setter with an invalid value and watch the assert fire.
 
 Next: [OOP: virtual dispatch, interfaces, traits](oop.md).

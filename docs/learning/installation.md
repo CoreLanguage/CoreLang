@@ -110,6 +110,12 @@ Full details in [projects.md](projects.md) and [freestanding-development.md](fre
 - **Moving the `core` binary alone.** Without `corert.o` and `std/` next to it (or `CORE_HOME` set), every compile fails while looking for the runtime.
 - **Forgetting `clang`/`cc`.** The final link step invokes the system C compiler; Core doesn't bundle a linker.
 
+## Performance notes
+
+- Build the compiler itself with `-DCMAKE_BUILD_TYPE=Release` — a Debug compiler is several times slower at compiling your programs.
+- `corert.o` is a few KB and links statically into every binary; binaries have no runtime dependency beyond libc (plus libm/pthread/dl, linked by default).
+- If builds feel slow, check that CMake found the shared LLVM library (`Linking against shared LLVM` in the configure output) rather than static components.
+
 ## Exercises
 
 1. Build Core, then compile and run the hello program above.

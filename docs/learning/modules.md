@@ -149,4 +149,12 @@ func main() {
 - **Don't** use imports where parameters would do — a function taking `Vec2` shouldn't import your geometry internals.
 - For distributing reusable libraries to other projects, that's packages — see [packages.md](packages.md).
 
+## Exercises
+
+1. Build the three-file geometry project from this page and run it.
+2. Add a `strings_util.cr` module with `pub func shout(s: string) -> string` and use it from `main.cr`.
+3. Import it twice under two names (`import strings_util as a`, `as b`) and confirm both call the same function.
+4. Create the circular-import error on purpose (`a` imports `b`, `b` imports `a`), read the cycle trace, then fix it by extracting shared declarations into a third module.
+5. Move the FFI declarations from [ffi.md](ffi.md) into a `c_api.cr` module and write a small safe wrapper (`pub func print_int(n: i32)`) — call only the wrapper from main.
+
 Next: [Projects](projects.md).

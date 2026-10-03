@@ -102,6 +102,14 @@ class Cat : Animal, Shape, Named {
 `obj as Interface` creates a 16-byte **fat pointer**: `{object pointer, itable pointer}` — the itable holds the interface's method implementations for that concrete class:
 
 ```core
+// standalone version (trimmed Cat: same shape as the class above, less ceremony)
+interface Shape { func area() -> f64 }
+
+class Cat : Shape {
+    pub func init() { }
+    pub func area() -> f64 { return 1.0 }
+}
+
 func total_area(shapes: [Shape; 2]) -> f64 {
     return shapes[0].area() + shapes[1].area()
 }
@@ -112,18 +120,30 @@ func main() {
     say s.area()              // 1 — goes through the itable
 
     shapes: [Shape; 2] = [c as Shape, c as Shape]
-    say total_area(shapes)
+    say total_area(shapes)    // 2
 }
 ```
 
 You can get the concrete object back with an unsafe downcast (see [unsafe.md](unsafe.md)):
 
 ```core
-back = unsafe { s as Cat }    // unwrap the fat pointer
-say back.speak()
+interface Shouter { func shout() -> string }
+
+class Loud : Shouter {
+    pub func init() { }
+    pub func shout() -> string { return "LOUD" }
+}
+
+func main() {
+    l = Loud { }
+    sh: Shouter = l as Shouter
+    say sh.shout()                 // LOUD
+    back = unsafe { sh as Loud }   // unwrap the fat pointer
+    say back.shout()               // LOUD
+}
 ```
 
-> **v0.1 limitations:** generic interfaces aren't supported yet; there are no `as?`/optional casts — a bad downcast is your bug, not a runtime error.
+> **v0.1 limitations:** generic interfaces aren't supported yet; there are no `as?`/optional casts — a bad downcast is your bug, not a runtime error. And unwrapping a fat pointer whose class **uses inheritance** currently miscompiles — when you need the concrete object back, keep a reference to it instead of unwrapping.
 
 ## Static vs dynamic: choosing
 
@@ -191,9 +211,6 @@ func main() {
 
     zoo: [ptr<Animal>; 2] = [&d, &c]
     for animal in zoo { say animal.speak() }   // Woof, Meow
-
-    back = unsafe { s as Cat }
-    say back.speak()          // Meow
 }
 ```
 
@@ -203,7 +220,7 @@ func main() {
 - **Forgetting `override`** in the derived class — the method silently shadows... no: the compiler requires `override` for matching virtuals; a signature mismatch means you wrote an unrelated method.
 - **Instantiating an abstract class.** Classes with `abstract` methods can't be constructed — derive first.
 - **Expecting interface values to be cheap as structs.** They're fat pointers; copying one copies 16 bytes, and calls go through itables.
-- **Unsafe-unwrap to the wrong class** — `s as Cat` on a `Shape` backed by a `Sq` is undefined behavior. Only unwrap what you put in.
+- **Unsafe-unwrap to the wrong class** — `s as Cat` on a `Shape` backed by a `Sq` is undefined behavior. Only unwrap what you put in (and avoid unwrapping entirely on inherited classes in v0.1 — see the limitation above).
 - **Assuming vtables for every class.** Only polymorphic classes pay; a class without virtuals is struct-cost.
 
 ## Performance notes
@@ -219,5 +236,13 @@ func main() {
 - **Use interfaces** for contracts across unrelated class hierarchies; **traits** when a sensible default implementation exists.
 - **Avoid** OOP for its own sake: Core's structs + free functions + generics cover most designs with less machinery.
 - For data-heavy code (sorting, simulation inner loops), static dispatch wins — see [algorithms.md](algorithms.md).
+
+## Exercises
+
+1. Define an `interface Speaker { func sound() -> string }`, implement it on two unrelated classes, store both as `Speaker` values in a `[Speaker; 2]` array, and call `sound()` through each element.
+2. Write a trait `Described { func describe() -> string { return "(no description)" } }`, implement it on one class that overrides it and one that doesn't; call through trait values.
+3. Make `Shape` an **abstract class** with `virtual area()` plus a concrete `tag()`; implement `Circle`/`Square`; write a function summing areas through base-class pointers.
+4. Time 1M virtual calls vs 1M static struct-method calls with `time.monotonic_ms()` — quantify the dispatch overhead.
+5. Store mixed types (`Circle`, `Square`) together as interface values in a fixed array and compute the total area.
 
 Next: [Generics](generics.md).

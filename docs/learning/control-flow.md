@@ -133,6 +133,20 @@ Matching `Option<T>` and `Result<T, E>` is the standard error-handling style —
 
 ```core
 // control.cr - FizzBuzz-ish with every construct
+enum Op {
+    Add(i32, i32),
+    Neg(i32),
+    Id
+}
+
+func eval(e: Op) -> i32 {
+    return match e {
+        Add(a, b) { a + b }
+        Neg(v)    { -v }
+        Id        { 7 }
+    }
+}
+
 func classify(n: i32) -> string {
     if n % 15 == 0 { return "fizzbuzz" }
     else if n % 3 == 0 { return "fizz" }
@@ -196,15 +210,6 @@ func main() {
     // match over enum payloads
     say eval(Op.Add(2, 3))  // 5
 }
-
-// (the enum Op and func eval from the match section above)
-func eval(e: Op) -> i32 {
-    return match e {
-        Add(a, b) { a + b }
-        Neg(v)    { -v }
-        Id        { 7 }
-    }
-}
 ```
 
 ## Common mistakes
@@ -231,5 +236,13 @@ func eval(e: Op) -> i32 {
 - `switch` — flat dispatch on integers/enums without payloads.
 - `match` — anything enum-shaped, or when you want a value out of a decision.
 - Avoid deep `else if` ladders over enums — `match` is exhaustive and the compiler checks it for you.
+
+## Exercises
+
+1. Print FizzBuzz for 1..=100 (multiples of 3, 5, both — reuse `classify` but write it yourself first).
+2. Sum the even numbers from 1..=100 twice: once with `while` + `continue`, once with a `for` range — results must match.
+3. Write `word(n: i32)` using `switch` that prints "zero".."three" and "many" for anything else; call it for 0..=5.
+4. Rewrite the `switch` from exercise 3 as a `match` expression returning the string, and print `word(2)` through it.
+5. Find the starting value under 1000 with the longest Collatz sequence (`collatz_steps` from the example) using nested loops.
 
 Next: [Functions](functions.md).

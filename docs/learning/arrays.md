@@ -67,11 +67,15 @@ func sum_ptr(xs: ptr<i32>, n: i32) -> i64 {
     return t
 }
 
-func sum_val(xs: [i32; 5]) -> i64 { ... }
+func sum_val(xs: [i32; 5]) -> i64 {   // by value: receives a COPY
+    mut t: i64 = 0
+    for x in xs { t += x as i64 }
+    return t
+}
 
 func main() {
     a: [i32; 5] = [1, 2, 3, 4, 5]
-    say sum_val(&a)      // wait - see below
+    say sum_val(a)       // no &: copies all 5 elements
     say sum_ptr(&a, 5)   // &a decays: ptr<[i32;5]> -> ptr<i32>
 }
 ```
@@ -177,5 +181,13 @@ func sum_ptr(xs: ptr<i32>, n: i32) -> i64 {
 - **Use fixed arrays** when the size is known and small-ish (buffers, lookup tables, matrices).
 - **Don't** use them as "lists" — for dynamic growth, build the heap-backed struct above (or see [data-structures.md](data-structures.md) for lists, stacks, queues, and hash maps).
 - Don't copy huge arrays around casually; pass `ptr<T>` instead.
+
+## Exercises
+
+1. Reverse a fixed `[i32; 6]` in place using two indices walking inward; print before and after.
+2. Find the second-largest element of an array in one pass (track two values).
+3. Multiply two 3×3 matrices stored as `[[i32; 3]; 3]` with nested `for` loops.
+4. Copy a fixed array's elements into a heap buffer (`alloc_array<i32>`), sum both ways, and `free`.
+5. Write `mutate_first(xs: [i32; 3])` that sets `xs[0] = 999`, call it, and show the caller's array is unchanged — then do the same through a `ptr<i32>` parameter and show it changes.
 
 Next: [Strings](strings.md).

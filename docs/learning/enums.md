@@ -205,4 +205,12 @@ func main() {
 - **Don't** use an enum when the set of cases is open (plugins, user-defined types) — use [interfaces](oop.md).
 - **Don't** stuff huge payloads in variants — store a pointer or reduce the payload.
 
+## Exercises
+
+1. Write `enum TrafficLight { Red, Yellow, Green }` and `next(t: TrafficLight) -> TrafficLight` via `match`; cycle it 6 times and print each state.
+2. Define `enum Token { Num(i32), Plus, Minus }` and write `eval3(a: Token, op: Token, b: Token) -> i32` handling `Num/Plus/Minus` payloads.
+3. Delete one `match` arm from a data-carrying enum function and read the exhaustiveness error; restore it.
+4. Write `safe_div(a: i32, b: i32) -> Option<i32>` and handle both cases with `match` — then print the `as i32` tag of each variant.
+5. Build a tiny state machine: `enum State { Idle, Running, Done }`, an array of 5 states, and a loop that advances non-`Done` entries.
+
 Next: [Error handling](error-handling.md).

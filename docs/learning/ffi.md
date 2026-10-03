@@ -38,6 +38,7 @@ func main() {
 | C → Core (`char*` return) | `str_from_c(p)` — wraps a NUL-terminated buffer in a view |
 
 ```core
+extern func printf(fmt: ptr<char>, ...) -> i32
 extern func getenv(name: ptr<char>) -> ptr<char>
 
 func main() {
@@ -69,7 +70,8 @@ extern func nanosleep(req: ptr<Timespec>, rem: ptr<Timespec>) -> i32
 
 func sleep_ns(ns: i64) {
     req = Timespec { tv_sec: ns / 1000000000, tv_nsec: ns % 1000000000 }
-    nanosleep(&req, null)
+    rem: ptr<Timespec> = null     // typed nulls pass where ptr<T> is expected
+    nanosleep(&req, rem)
 }
 ```
 
@@ -141,5 +143,13 @@ Verified output: `2^10 = 1024`, `9`, `8`, `true`, `str|mix 9 x`.
 - **Wrap, don't litter**: centralize extern declarations in one module (e.g. `c_api.cr`) with clean Core-style wrappers — see [modules.md](modules.md).
 - **Don't** call variadic functions in hot loops (va_list parsing isn't free) — prefer non-variadic entry points when the library has them.
 - For assembler-level control, skip C entirely: [inline-assembly.md](inline-assembly.md).
+
+## Exercises
+
+1. Declare and call `strlen`, `strcmp`, and `abs` from libc; print the results for three inputs.
+2. Wrap `getenv("PATH")` into a safe Core function returning `Option<string>` — `null` maps to `None`.
+3. Declare `nanosleep` with its `Timespec` struct and write `sleep_us(us: i64)`; time it with `time.monotonic_ms()`.
+4. Use `pow` and `sqrt` from libm (already linked) to compute the hypotenuse of a 3-4-5 triangle through C calls.
+5. Put all your extern declarations into a `c_api.cr` module and re-export friendly wrappers (see [modules.md](modules.md) for visibility rules).
 
 Next: [Unsafe](unsafe.md).

@@ -200,4 +200,12 @@ Verified output: `8080`, `bad: port too big`, `bad: non-digit char`, `443`, `ok`
 - **Don't** build exception-emulation frameworks with nested enums; keep it flat and boring.
 - For resource cleanup on error paths, remember: no `defer` — free before returning `Err` (see [memory-management.md](memory-management.md)).
 
+## Exercises
+
+1. Extend `parse_port` into `parse_int(s: string) -> Result<i32, string>` handling a leading `-`.
+2. Write `unwrap_or<T>(o: Option<T>, fallback: T) -> T` with `match` and use it on a `Some` and a `None`.
+3. Define `enum ParseErr { Empty, BadChar(char), TooBig }`, return it from a parser, and print a different message per variant (bind the payload).
+4. Chain two fallible calls: `parse_int` then a range check, returning `Result<i32, string>` from each failure point — no exceptions, early returns only.
+5. Write `tests/test_parse.cr` with three `test_*` functions using `assert` and run `core test` in a project (see [projects.md](projects.md)).
+
 Next: [Data structures](data-structures.md).

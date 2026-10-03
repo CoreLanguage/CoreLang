@@ -133,4 +133,12 @@ core list                  # shows resolved 2.1.0 + commit
 - **Don't** depend on an unreleased branch; ask the maintainer to tag, or use a local path dep while iterating.
 - Keep stdlib usage (`math`, `memory`, `thread`) import-direct — they're not packages.
 
+## Exercises
+
+1. Build the local mock-repo walkthrough from "Complete working example" end to end.
+2. Change the constraint to `@^2.0.0`, bump your mock package's tag to `v2.2.0`, and run `core update` — confirm `core list` shows the new version.
+3. Add a second function to the package, commit, tag `v2.2.1`, update, and use the new function from your app.
+4. Switch the dependency to a **local path** (`core install ../coolstrings`) and verify edits to the package show up on the next build without reinstalling.
+5. Run `core remove` and confirm both `core.toml` and `core.lock` are clean — then re-install and diff the two files.
+
 Next: [Concurrency](concurrency.md).

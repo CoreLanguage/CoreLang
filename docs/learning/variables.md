@@ -122,7 +122,8 @@ func main() {
     z: f64 = 1.5            // immutable, explicit type
 
     y += 5                  // y is 25
-    say x + y + z           // 10 + 25 + 1.5 -> 36.5
+    say x + y               // 35 — same-type addition is fine
+    say z                   // 1.5
 
     say MAX                 // 100
 

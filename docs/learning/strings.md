@@ -148,4 +148,12 @@ func main() {
 - Don't use it as a byte container for binary data — use `ptr<u8>` + `len` or a `[]`-of-bytes struct so ownership is explicit.
 - For user-facing programs that build lots of dynamic text, consider wrapping a growable byte buffer with helper functions (see [data-structures.md](data-structures.md)).
 
+## Exercises
+
+1. Count the vowels in a string by indexing (`s[i]`) in a `for i in 0..len(s)` loop.
+2. Reverse a string into a second buffer (a `[char; N]` array) and print it back char by char.
+3. Write `is_palindrome(s: string) -> bool` comparing `s[i]` and `s[len(s) - 1 - i]`.
+4. Write `to_upper(c: char) -> char` for lowercase ASCII letters (`c >= 'a' && c <= 'z'`) and map "core lang" through it.
+5. Declare `extern func strlen(s: ptr<char>) -> i32` and compare `strlen(c_str(s))` with `len(s)` for three strings — explain when they can differ (they can't here; bytes vs bytes).
+
 Next: [Structs](structs.md).
