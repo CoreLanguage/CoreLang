@@ -47,7 +47,9 @@ pub func say(v: u128)   { core_rt_print_u128(v); core_rt_print_nl() }
 pub func say(v: f32)    { core_rt_print_f32(v); core_rt_print_nl() }
 pub func say(v: f64)    { core_rt_print_f64(v); core_rt_print_nl() }
 pub func say<T>(v: ptr<T>) {
-    core_rt_print_ptr(v as ptr<void>)
+    unsafe {
+        core_rt_print_ptr(v as ptr<void>)
+    }
     core_rt_print_nl()
 }
 

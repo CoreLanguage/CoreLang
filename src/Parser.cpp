@@ -911,8 +911,14 @@ DFunc *Parser::parseFuncRest(bool isPub, Decl *parent, unsigned mods, std::strin
     f->retType = parseType();
     if (!f->retType) return nullptr;
   }
-  skipNewlines();
-  if (atPunct(";")) { advance(); f->body = nullptr; return f; } // prototype
+  if (atPunct(";")) { advance(); f->body = nullptr; return f; } // prototype with ';'
+  // a prototype may also end at a newline / declaration boundary (extern + interfaces)
+  if (at(Tok::Newline) || at(Tok::EndOfFile) || atKw("extern") || atKw("pub") || atKw("func") ||
+      atKw("struct") || atKw("class") || atKw("interface") || atKw("trait") || atKw("enum") ||
+      atKw("import") || atPunct("@") || atKw("abstract") || atKw("virtual") || atKw("override")) {
+    f->body = nullptr;
+    return f; // newline NOT consumed: parseFile handles it
+  }
   f->body = parseBlock();
   if (!f->body) return nullptr;
   return f;
@@ -1259,8 +1265,7 @@ SourceUnit *Parser::parseFile() {
     if (!d) return nullptr;
     attrs.clear();
     unit->decls.push_back(d);
-    if (at(Tok::Newline)) { skipNewlines(); continue; }
-    if (at(Tok::EndOfFile)) break;
+    if (at(Tok::Newline) || at(Tok::EndOfFile)) { skipNewlines(); continue; }
     if (atPunct(";")) { skipNewlines(); continue; }
     errorAt(loc(), strfmt("expected newline after declaration, found '%s'", tk().text.c_str()), "", tk().len);
     return nullptr;

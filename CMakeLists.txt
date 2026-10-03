@@ -33,7 +33,7 @@ add_executable(core ${CORE_SRCS})
 
 target_include_directories(core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${LLVM_INCLUDE_DIRS})
 target_compile_definitions(core PRIVATE ${LLVM_DEFINITIONS})
-target_compile_options(core PRIVATE -fno-rtti -Wall -Wextra)
+target_compile_options(core PRIVATE -fno-rtti -Wall -Wextra -g)
 target_link_libraries(core PRIVATE ${CORE_LLVM_LINK_LIB} pthread)
 
 # ---------------------------------------------------------------------------

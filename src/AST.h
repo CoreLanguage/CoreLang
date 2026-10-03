@@ -383,6 +383,7 @@ struct DConst : Decl {
   TypeExpr *type = nullptr;
   Expr *init = nullptr;
   bool isPub = false;
+  void *folded = nullptr; // codegen: cached constant
   DConst(SourceLoc l) : Decl(Const, l) {}
 };
 struct DImport : Decl {

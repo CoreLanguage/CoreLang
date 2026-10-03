@@ -55,6 +55,7 @@ bool Sema::registerModules(std::vector<ModuleSema *> &mods) {
           return false;
         }
         m->types[s->name] = s;
+        declModule[s] = m;
         buildStructLayout(s);
         break;
       }
@@ -65,6 +66,7 @@ bool Sema::registerModules(std::vector<ModuleSema *> &mods) {
           return false;
         }
         m->types[c->name] = c;
+        declModule[c] = m;
         break;
       }
       case Decl::Interface: case Decl::Trait: {
@@ -74,6 +76,7 @@ bool Sema::registerModules(std::vector<ModuleSema *> &mods) {
           return false;
         }
         m->types[it->name] = it;
+        declModule[it] = m;
         break;
       }
       case Decl::Enum: {
@@ -83,12 +86,14 @@ bool Sema::registerModules(std::vector<ModuleSema *> &mods) {
           return false;
         }
         m->types[e->name] = e;
+        declModule[e] = m;
         break;
       }
       case Decl::Func: case Decl::Extern: {
         DFunc *f = d->kind == Decl::Func ? (DFunc *)d : ((DExtern *)d)->proto;
         if (d->kind == Decl::Extern) f->isExtern = true;
         m->funcs[f->name].push_back(f);
+        funcModule[f] = m;
         break;
       }
       case Decl::Global: {
@@ -264,6 +269,7 @@ Type *Sema::resolveType(TypeExpr *te) {
   if (!te) return tc.prim(PRIM_void);
   switch (te->kind) {
   case TypeExpr::Prim:
+    if (te->prim == PRIM_never) return tc.never();
     return tc.prim(te->prim);
   case TypeExpr::Named: {
     return resolveNamedType(te);
@@ -295,6 +301,16 @@ Type *Sema::resolveType(TypeExpr *te) {
 }
 
 Type *Sema::resolveNamedType(TypeExpr *te) {
+  // builtin pointer type constructor: ptr<T>
+  if (te->nameParts.size() == 1 && te->nameParts[0] == "ptr") {
+    if (te->genericArgs.size() == 1) {
+      Type *pointee = resolveType(te->genericArgs[0]);
+      if (!pointee) return nullptr;
+      return tc.ptr(pointee);
+    }
+    diag.error(te->loc, "ptr expects exactly one type argument: `ptr<T>`", "", 3);
+    return nullptr;
+  }
   // generic variable in scope?
   if (te->nameParts.size() == 1 && te->genericArgs.empty() && subst) {
     auto it = subst->find(te->nameParts[0]);
@@ -393,18 +409,14 @@ std::string Sema::mangleFuncName(DFunc *f, const std::vector<Type *> &genericArg
   if (f->isExtern) return f->linkName.empty() ? f->name : f->linkName;
   if (f->name == "main" && f->parent == nullptr && !f->isExtern) return "main";
   std::string out = "_C";
-  // module path components
-  std::string mod = curModule ? curModule->name : "";
-  // for methods, use the DEFINING module of the type decl
+  // module path components: the DEFINING module of this function
+  std::string mod;
+  auto fm = funcModule.find(f);
+  if (fm != funcModule.end()) mod = fm->second->name;
+  else if (curModule) mod = curModule->name;
   if (f->parent) {
-    Decl *pd = f->parent;
-    if (pd->kind == Decl::Class || pd->kind == Decl::Struct || pd->kind == Decl::Enum) {
-      // find defining module of the type
-      for (auto *m : modules) {
-        for (auto &[tname, td] : m->types)
-          if (td == pd) mod = m->name;
-      }
-    }
+    auto tm = declModule.find(f->parent);
+    if (tm != declModule.end()) mod = tm->second->name;
   }
   size_t start = 0;
   while (true) {
@@ -423,8 +435,22 @@ std::string Sema::mangleFuncName(DFunc *f, const std::vector<Type *> &genericArg
     out += std::to_string(pn.size()) + pn;
   }
   out += std::to_string(f->name.size()) + f->name;
-  if (!genericArgs.empty()) {
+  // parameter types disambiguate overloads (and specialize generics)
+  std::vector<Type *> ptypes;
+  bool ptypesOk = true;
+  for (auto &p : f->params) {
+    Type *pt = resolveType(p.type);
+    if (!pt) { ptypesOk = false; break; }
+    ptypes.push_back(pt);
+  }
+  if (ptypesOk && !f->isExtern) {
     out += "I";
+    for (size_t pi = 0; pi < ptypes.size(); pi++)
+      out += mangleTypeForName(ptypes[pi]);
+    out += "E";
+  }
+  if (!genericArgs.empty()) {
+    out += "G";
     for (size_t gi = 0; gi < genericArgs.size(); gi++) {
       if (gi) out += ",";
       out += mangleTypeForName(genericArgs[gi]);
@@ -1850,8 +1876,8 @@ void Sema::checkAssign(EAssign *a) {
   }
   Type *tt = a->target->type, *vt = a->value->type;
   if (!tt || !vt) return;
-  // compound assignment: check as binary on (target, value)
-  if (!a->op.empty()) {
+  // plain assignment is op "="; compounds are "+=" etc.
+  if (a->op != "=") {
     // build temporary binary node for rule checking
     EBinary tmp(a->loc, a->op.substr(0, a->op.size() - 1), a->target, a->value);
     checkBinary(&tmp);
@@ -2305,6 +2331,14 @@ Type *Sema::checkCall(ECall *call) {
   DFunc *chosen = resolveOverload(candidates, call->args, call->loc, name, ok);
   if (!ok || !chosen) return nullptr;
   call->resolvedFunc = chosen;
+  // annotate the callee ident so codegen finds the implementation
+  if (callee->kind == Expr::Ident) {
+    auto *id = (EIdent *)callee;
+    id->idKind = IdKind::Func;
+    id->resolvedFunc = chosen;
+  } else if (callee->kind == Expr::Member && callee->type == nullptr) {
+    // module-qualified/static callees already carry memberKind
+  }
 
   // generic instantiation
   if (!chosen->genericParams.empty()) {
@@ -2880,6 +2914,7 @@ DFunc *Sema::resolveOverload(const std::vector<DFunc *> &cands, const std::vecto
     if (!f->isVariadic && args.size() != f->params.size()) continue;
     int score = 2;
     bool matches = true;
+    quiet_++;
     for (size_t ai = 0; ai < args.size() && ai < f->params.size(); ai++) {
       Type *want = resolveType(f->params[ai].type);
       Type *got = args[ai]->type;
@@ -2917,6 +2952,7 @@ DFunc *Sema::resolveOverload(const std::vector<DFunc *> &cands, const std::vecto
       matches = false;
       break;
     }
+    quiet_--;
     if (!matches) continue;
     if (score > bestScore) { bestScore = score; best = f; tie = false; }
     else if (score == bestScore && best != nullptr) tie = true;
@@ -2932,10 +2968,13 @@ DFunc *Sema::resolveOverload(const std::vector<DFunc *> &cands, const std::vecto
       for (size_t ci = 0; ci < cands.size(); ci++) {
         if (ci) candStr += " | ";
         candStr += cands[ci]->name + "(";
+        quiet_++;
         for (size_t pi = 0; pi < cands[ci]->params.size(); pi++) {
           if (pi) candStr += ", ";
-          candStr += typeToString(resolveType(cands[ci]->params[pi].type));
+          Type *pt = resolveType(cands[ci]->params[pi].type);
+          candStr += pt ? typeToString(pt) : std::string(cands[ci]->params[pi].type ? "?" : "void");
         }
+        quiet_--;
         candStr += ")";
       }
       diag.error(loc, strfmt("no matching function '%s' for arguments (%s)", name.c_str(), argTys.c_str()),

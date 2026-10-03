@@ -74,6 +74,8 @@ public:
   ASTContext ctx; // node arena for generic instantiations
   std::vector<ModuleSema *> modules; // dependency order, prelude first
   std::map<std::string, ModuleSema *> byPath;
+  std::map<DFunc *, ModuleSema *> funcModule; // defining module per function
+  std::map<void *, ModuleSema *> declModule;  // defining module per type decl
   std::map<Decl *, ClassLayout *> layouts;   // DClass* -> layout (also structs)
   std::map<std::pair<DFunc *, std::string>, GenericInstance *> instances;
   std::vector<GenericInstance *> instanceOrder; // deterministic emission order
@@ -88,8 +90,7 @@ public:
   std::string mangleTypeForName(Type *t);
   int quiet_ = 0;
 
-private:
-  // active checking context
+  // active checking context (public: Codegen reads substitution/layout state)
   ModuleSema *curModule = nullptr;
   DFunc *curFunc = nullptr;
   Type *curReturnType = nullptr;
