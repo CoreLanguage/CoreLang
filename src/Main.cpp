@@ -57,6 +57,10 @@ int main(int argc, char **argv) {
     return 0;
   }
   std::string cmd = argv[1];
+  if (cmd == "--help" || cmd == "-h" || cmd == "help") {
+    printGeneralHelp();
+    return 0;
+  }
 
   DriverOptions dopts;
   std::vector<std::string> positionals;
@@ -84,7 +88,29 @@ int main(int argc, char **argv) {
 
   if (help) {
     if (cmd == "compile") printCompileHelp();
-    else printGeneralHelp();
+    else if (cmd == "build") {
+      printf("core build - build the project in the current directory\n");
+      printf("\nUSAGE: core build [-O0..-O3 | -Os] [--debug] [--target=<triple>]\n");
+      printf("\nReads core.toml, compiles src/main.cr and every imported module into\n");
+      printf("one executable named after the project's package name.\n");
+      return 0;
+    } else if (cmd == "run") {
+      printf("core run - build and run the project\n");
+      printf("\nUSAGE: core run [program-arguments...]\n");
+      return 0;
+    } else if (cmd == "test") {
+      printf("core test - run the project's tests\n");
+      printf("\nCompiles each tests/*.cr file (entry = its main()) and runs it.\n");
+      printf("A nonzero exit from a test binary counts as a failure.\n");
+      printf("Use assert()/assert(cond, msg) from the prelude in tests.\n");
+      return 0;
+    } else if (cmd == "init") {
+      printf("core init - initialize a new Core project\n");
+      printf("\nUSAGE: core init [name]\n");
+      printf("\nCreates core.toml, core.lock, src/main.cr, tests/, README.md.\n");
+      printf("Refuses to overwrite an existing core.toml.\n");
+      return 0;
+    } else printGeneralHelp();
     return 0;
   }
 
