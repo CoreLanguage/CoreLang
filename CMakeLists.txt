@@ -15,14 +15,28 @@ endif()
 find_package(LLVM 18.1 REQUIRED CONFIG)
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION} at ${LLVM_CMAKE_DIR}")
 
-find_library(CORE_LLVM_DYLIB NAMES LLVM-18 LLVM-18.1 LLVM HINTS ${LLVM_LIBRARY_DIRS})
-if(CORE_LLVM_DYLIB)
+# Link LLVM statically into the compiler by default. The resulting binary
+# only needs base-system libraries at runtime (zlib/zstd/ncurses/m), so it
+# installs and runs on any Linux without LLVM installed. Build with
+# -DCORE_LLVM_STATIC=OFF to link the shared libLLVM instead (smaller binary,
+# but requires llvm-18 runtime libraries on every machine that runs core).
+option(CORE_LLVM_STATIC "Link LLVM statically (portable binaries)" ON)
+
+if(NOT CORE_LLVM_STATIC)
+  find_library(CORE_LLVM_DYLIB NAMES LLVM-18 LLVM-18.1 LLVM HINTS ${LLVM_LIBRARY_DIRS})
+  if(NOT CORE_LLVM_DYLIB)
+    message(FATAL_ERROR "shared LLVM requested (-DCORE_LLVM_STATIC=OFF) but libLLVM not found")
+  endif()
   message(STATUS "Linking against shared LLVM: ${CORE_LLVM_DYLIB}")
   set(CORE_LLVM_LINK_LIB ${CORE_LLVM_DYLIB})
 else()
   message(STATUS "Linking against static LLVM components")
-  llvm_map_components_to_libnames(CORE_LLVM_LINK_LIB
-    core support analysis codegen target mc irprinter bitwriter targetparser passes)
+  execute_process(COMMAND llvm-config-18 --link-static --libfiles
+                  OUTPUT_VARIABLE LLVM_STATIC_FILES OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+  separate_arguments(LLVM_STATIC_FILES UNIX_COMMAND "${LLVM_STATIC_FILES}")
+  # Polly is optional and unused by Core; skip it when not installed
+  list(FILTER LLVM_STATIC_FILES EXCLUDE REGEX "Polly")
+  set(CORE_LLVM_LINK_LIB ${LLVM_STATIC_FILES})
 endif()
 
 # ---------------------------------------------------------------------------
@@ -34,7 +48,19 @@ add_executable(core ${CORE_SRCS})
 target_include_directories(core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src ${LLVM_INCLUDE_DIRS})
 target_compile_definitions(core PRIVATE ${LLVM_DEFINITIONS})
 target_compile_options(core PRIVATE -fno-rtti -Wall -Wextra -g)
-target_link_libraries(core PRIVATE ${CORE_LLVM_LINK_LIB} pthread)
+if(CORE_LLVM_STATIC)
+  # the static archives reference this symbol through a weak check in
+  # abi-breaking.h; defining it keeps the ABI verify pointer consistent
+  target_compile_definitions(core PRIVATE LLVM_DISABLE_ABI_BREAKING_CHECKS)
+  target_link_options(core PRIVATE -static-libstdc++ -static-libgcc)
+  execute_process(COMMAND llvm-config-18 --link-static --system-libs
+                  OUTPUT_VARIABLE LLVM_SYSLIBS OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+  separate_arguments(LLVM_SYSLIBS UNIX_COMMAND "${LLVM_SYSLIBS}")
+  target_link_libraries(core PRIVATE
+    -Wl,--start-group ${CORE_LLVM_LINK_LIB} -Wl,--end-group pthread ${LLVM_SYSLIBS})
+else()
+  target_link_libraries(core PRIVATE ${CORE_LLVM_LINK_LIB} pthread)
+endif()
 
 # ---------------------------------------------------------------------------
 # Runtime support library (compiled C runtime: printing, memory, threads...)
