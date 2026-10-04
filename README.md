@@ -52,28 +52,48 @@ Hello, Core!
   --freestanding --target=x86_64 --emit-object` builds kernel objects with a
   custom entry point; aarch64 and riscv64 targets supported.
 
-## Building from source
+## Install
 
-Requirements: CMake ≥ 3.20, C++17 compiler, LLVM 18 development libraries
-(`llvm-18-dev` / `llvm-dev`), a C compiler for linking produced binaries.
+64-bit Linux (x86_64, aarch64, riscv64). One line:
 
 ```console
-$ ./install.sh                   # builds, tests, installs to /usr/local
+curl -fsSL https://raw.githubusercontent.com/snitchbossdotcom/corelang/main/install.sh | bash
 ```
 
-or manually:
+The script detects your CPU architecture, downloads the matching release
+tarball, and installs to `/usr/local` (`core` in `bin`, the runtime and
+standard library in `lib/core`). Then:
 
 ```console
-$ cmake -S . -B build
-$ cmake --build build
-```
-
-The compiler binary lands at `build/core` (with `corert.o` + `std/` beside it).
-Install with `./install.sh` (or `cmake --install build`) if desired.
-
-```console
-$ ./build/core version
+$ core version
 Core compiler 0.1.0 (LLVM 18.1.3 backend)
+$ core init hello && cd hello && core run
+Hello, Core!
+```
+
+Set `CORE_INSTALL_PREFIX=$HOME/.local` to install without root. Uninstall
+with `CORE_UNINSTALL=1 bash <(curl -fsSL .../install.sh)`.
+
+### Building from source
+
+Requirements: CMake ≥ 3.20, a C++17 compiler, LLVM 18 development packages,
+and a C compiler. The compiler links LLVM statically by default, so the
+binary you build runs on any Linux without LLVM installed.
+
+```console
+$ git clone https://github.com/snitchbossdotcom/corelang.git core
+$ cd core
+$ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+$ cmake --build build -j$(nproc)
+$ python3 tests/run_tests.py          # 103 end-to-end tests
+$ sudo cmake --install build          # or: ./scripts/build-release.sh
+```
+
+To cut a release tarball for the current architecture (what the installer
+downloads):
+
+```console
+$ ./scripts/build-release.sh          # -> dist/core-linux-<arch>.tar.gz
 ```
 
 ## Quick tour
@@ -140,13 +160,14 @@ func max_of<T>(a: T, b: T) -> T {
 ## Repository layout
 
 ```
-compiler/src     the compiler (lexer, parser, AST, sema, codegen, driver)
-compiler/runtime corert.c — the minimal C runtime (printing, memory, threads)
+src/             the compiler (lexer, parser, AST, sema, codegen, driver)
+runtime/         corert.c — the minimal C runtime (printing, memory, threads)
 std/             the standard library (prelude + memory/math/thread/time/process/simd)
 examples/        small, working example programs for every feature
 tests/           end-to-end test suite (tests/run_tests.py)
+scripts/         release tarball builder
 docs/
-  learning/      beginner tutorials (variables ... OS development)
+  guide/         the language guide (install, syntax, types, memory, stdlib, ...)
   language/      SPEC.md, memory-model.md, abi.md, concurrency.md
   compiler/      architecture and subsystem guides
   internals/     monomorphization, ABI internals
@@ -163,8 +184,8 @@ $ python3 tests/run_tests.py --core build/core
 
 ## Documentation
 
-Start with [docs/learning/introduction.md](docs/learning/introduction.md).
-The authoritative language reference is [docs/language/SPEC.md](docs/language/SPEC.md).
+Start with the [guide](docs/guide/getting-started.md). The authoritative
+language reference is [docs/language/SPEC.md](docs/language/SPEC.md).
 Contributing? Read [docs/contributing/getting-started.md](docs/contributing/getting-started.md)
 and [docs/contributing/adding-a-feature.md](docs/contributing/adding-a-feature.md).
 
