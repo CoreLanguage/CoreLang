@@ -1,0 +1,99 @@
+# Installation
+
+Core runs on 64-bit Linux: x86_64, aarch64, and riscv64. There are two
+ways to get the compiler: a release tarball, or building from source.
+
+## One-line install
+
+```console
+curl -fsSL https://raw.githubusercontent.com/snitchbossdotcom/corelang/main/install.sh | bash
+```
+
+What the script does:
+
+1. Runs `uname -m` to detect your architecture (x86_64, aarch64, or
+   riscv64). Anything else, or a non-Linux system, is rejected.
+2. Downloads the matching release tarball from GitHub releases.
+3. Unpacks it to `/usr/local`: `core` goes to `/usr/local/bin`, the
+   runtime and standard library to `/usr/local/lib/core/`.
+
+`/usr/local` needs root, so the script uses `sudo` when it unpacks. Read
+the script before piping it into a shell; that is always the right
+reflex.
+
+Verify the install:
+
+```console
+$ core version
+Core compiler 0.1.0 (LLVM 18.1.x backend)
+```
+
+Then write your first program (see [getting-started.md](getting-started.md)
+for the full walk-through):
+
+```console
+$ mkdir hello && cd hello
+$ core init hello
+$ core run
+Hello, Core!
+```
+
+## Uninstalling
+
+The install puts exactly two things on the system:
+
+```console
+sudo rm /usr/local/bin/core
+sudo rm -r /usr/local/lib/core
+```
+
+Nothing else is written outside your home directory (the package cache
+in `~/.cache/core`, if you used packages).
+
+## Building from source
+
+If there is no release for your machine, or you want to hack on the
+compiler itself, build it. The prerequisites are a C/C++ toolchain,
+CMake 3.20 or newer, and LLVM 18 development packages. LLVM 18 is the
+one tested version; newer LLVM may work but is not guaranteed.
+
+On Debian/Ubuntu:
+
+```console
+sudo apt install build-essential cmake git \
+    llvm-18-dev libclang-18-dev clang libpolly-18-dev
+```
+
+Check that CMake can see LLVM:
+
+```console
+$ llvm-config-18 --version
+18.1.x
+```
+
+Build:
+
+```console
+git clone https://github.com/snitchbossdotcom/corelang core
+cd core
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j$(nproc)
+```
+
+This produces the compiler (`build/core`) and the runtime object
+(`build/corert.o`). Install them to the same locations the release
+script uses:
+
+```console
+sudo cmake --install build
+```
+
+Run the test suite before trusting a self-built compiler:
+
+```console
+cd build && ctest --output-on-failure
+```
+
+The compiler finds its runtime (`corert.o`) and standard library next to
+its own binary or in `/usr/local/lib/core`; both install paths work with
+no configuration.
