@@ -21,6 +21,31 @@ What the script does:
 the script before piping it into a shell; that is always the right
 reflex.
 
+The repository is currently private, so the download needs
+authentication. Export a token with the `repo` scope first:
+
+```console
+export GH_TOKEN=ghp_yourtoken
+curl -fsSL https://raw.githubusercontent.com/snitchbossdotcom/corelang/main/install.sh | bash
+```
+
+(The raw.githubusercontent fetch of the script itself needs the token
+too when the repo is private: `curl -H "Authorization: Bearer $GH_TOKEN"
+-fsSL ...`.) Once the repo is public, or a release exists, the plain
+one-liner works with no token.
+
+Alternatives:
+
+- Set `CORE_RELEASE_URL` to any location hosting the tarballs (a mirror,
+  an internal server).
+- Install without root: `CORE_INSTALL_PREFIX=$HOME/.local bash install.sh`.
+
+Uninstall:
+
+```console
+CORE_UNINSTALL=1 bash install.sh
+```
+
 Verify the install:
 
 ```console
