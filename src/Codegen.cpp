@@ -626,7 +626,7 @@ void Codegen::emitFuncBody(DFunc *f, const std::vector<Type *> &genericArgs) {
     if (hasSelf) {
       llvm::Argument &selfArg = *fnp->args().begin();
       Type *selfTy = sema.selfTypeOf(f);
-      auto *slot = builder.CreateAlloca(llvmType(selfTy), nullptr, "self");
+      auto *slot = allocaInEntry(llvmType(selfTy), "self");
       builder.CreateStore(&selfArg, slot);
       localSlots["self"] = slot;
       argIdx++;
@@ -634,7 +634,7 @@ void Codegen::emitFuncBody(DFunc *f, const std::vector<Type *> &genericArgs) {
     for (auto &p : f->params) {
       llvm::Argument &arg = *std::next(fnp->args().begin(), argIdx);
       arg.setName(p.name);
-      auto *slot = builder.CreateAlloca(arg.getType(), nullptr, p.name + ".addr");
+      auto *slot = allocaInEntry(arg.getType(), p.name + ".addr");
       builder.CreateStore(&arg, slot);
       localSlots[p.name] = slot;
       argIdx++;
@@ -830,6 +830,17 @@ llvm::CallInst *Codegen::ccall(llvm::FunctionType *fty, llvm::Value *callee,
   if (fty->getReturnType()->isVoidTy())
     return builder.CreateCall(fty, callee, args);
   return builder.CreateCall(fty, callee, args, name);
+}
+
+
+// alloca helper: all allocas must live in the entry block, otherwise a local
+// declared inside a loop/branch allocates new stack on every execution and
+// eventually exhausts (or corrupts) the stack.
+llvm::AllocaInst *Codegen::allocaInEntry(llvm::Type *ty, const llvm::Twine &name) {
+  llvm::Function *f = builder.GetInsertBlock()->getParent();
+  llvm::BasicBlock &entry = f->getEntryBlock();
+  llvm::IRBuilder<> tmp(&entry, entry.getFirstInsertionPt());
+  return tmp.CreateAlloca(ty, nullptr, name);
 }
 
 llvm::Value *Codegen::emitExpr(Expr *e) {
@@ -1048,7 +1059,7 @@ bool Codegen::enumHasPayloads(DEnum *e) {
 llvm::Value *Codegen::emitVariantValue(DEnum *en, unsigned tag, Type *enumTy) {
   unsigned off, total, align;
   llvm::Type *storage = enumStorageType(enumTy, &off, &total, &align);
-  llvm::Value *slot = builder.CreateAlloca(storage, nullptr, "variant");
+  llvm::Value *slot = allocaInEntry(storage, "variant");
   builder.CreateStore(ConstantInt::get(builder.getInt32Ty(), tag),
                       builder.CreateBitCast(slot, PointerType::get(ctx, 0)));
   return builder.CreateLoad(storage, slot);
@@ -1787,7 +1798,7 @@ llvm::Value *Codegen::emitVariantCtor(ECall *c) {
     return ConstantInt::get(builder.getInt32Ty(), tag);
   }
   // build byte-array constant or runtime stores: use stack alloc + stores
-  llvm::Value *slot = builder.CreateAlloca(storage, nullptr, "variant");
+  llvm::Value *slot = allocaInEntry(storage, "variant");
   // store tag
   llvm::Value *tagPtr = builder.CreateBitCast(slot, PointerType::get(ctx, 0));
   builder.CreateStore(ConstantInt::get(builder.getInt32Ty(), tag), tagPtr);
@@ -1853,7 +1864,7 @@ llvm::Value *Codegen::emitLambda(ELambda *lam) {
   for (size_t pi = 0; pi < lam->params.size(); pi++) {
     llvm::Argument &arg = *lfn->getArg((unsigned)(pi + 1));
     arg.setName(lam->params[pi].name);
-    auto *slot = builder.CreateAlloca(arg.getType(), nullptr, lam->params[pi].name + ".addr");
+    auto *slot = allocaInEntry(arg.getType(), lam->params[pi].name + ".addr");
     builder.CreateStore(&arg, slot);
     localSlots[lam->params[pi].name] = slot;
   }
@@ -1893,7 +1904,7 @@ llvm::Value *Codegen::emitLambda(ELambda *lam) {
 llvm::Value *Codegen::emitStructLit(EStructLit *sl) {
   Type *ty = sl->type;
   llvm::StructType *st = structTypeFor(ty);
-  llvm::Value *slot = builder.CreateAlloca(st, nullptr, "tmpobj");
+  llvm::Value *slot = allocaInEntry(st, "tmpobj");
   // polymorphic class literal: set vptr before init
   if (ty->isClass()) {
     DClass *c = (DClass *)ty->decl;
@@ -1977,7 +1988,7 @@ llvm::Value *Codegen::emitArrayLit(EArrayLit *al) {
   llvm::ArrayType *at = cast<llvm::ArrayType>(llvmType(arrTy));
   if (al->repeat) {
     llvm::Value *val = emitExpr(al->elems[0]);
-    llvm::Value *slot = builder.CreateAlloca(at, nullptr, "tmparr");
+    llvm::Value *slot = allocaInEntry(at, "tmparr");
     unsigned n = (unsigned)arrTy->arrayLen;
     for (unsigned i = 0; i < n; i++) {
       llvm::Value *ep = builder.CreateGEP(at, slot, {ConstantInt::get(builder.getInt64Ty(), 0),
@@ -1986,7 +1997,7 @@ llvm::Value *Codegen::emitArrayLit(EArrayLit *al) {
     }
     return builder.CreateLoad(at, slot);
   }
-  llvm::Value *slot = builder.CreateAlloca(at, nullptr, "tmparr");
+  llvm::Value *slot = allocaInEntry(at, "tmparr");
   for (size_t i = 0; i < al->elems.size(); i++) {
     llvm::Value *val = emitExpr(al->elems[i]);
     llvm::Value *ep = builder.CreateGEP(at, slot, {ConstantInt::get(builder.getInt64Ty(), 0),
@@ -2017,7 +2028,7 @@ llvm::Value *Codegen::emitMatch(EMatch *m) {
     for (auto &v : en->variants)
       if (!v.payloadTypes.empty()) hasPayload = true;
     if (hasPayload) {
-      scrutAddr = builder.CreateAlloca(llvmType(st), nullptr, "match.tmp");
+      scrutAddr = allocaInEntry(llvmType(st), "match.tmp");
       builder.CreateStore(scrut, scrutAddr);
       tag = builder.CreateLoad(builder.getInt32Ty(),
                                builder.CreateBitCast(scrutAddr, PointerType::get(ctx, 0)));
@@ -2027,7 +2038,7 @@ llvm::Value *Codegen::emitMatch(EMatch *m) {
   bool matchHasValue = m->type && !m->type->isVoid() && !m->type->isNever() &&
                        m->type->kind != TypeKind::Invalid;
   llvm::Value *resultSlot =
-      matchHasValue ? builder.CreateAlloca(llvmType(m->type), nullptr, "match.res") : nullptr;
+      matchHasValue ? allocaInEntry(llvmType(m->type), "match.res") : nullptr;
   // build blocks
   std::vector<std::pair<llvm::BasicBlock *, MatchArm *>> armBlocks;
   for (auto &arm : m->arms) {
@@ -2111,7 +2122,7 @@ llvm::Value *Codegen::emitMatch(EMatch *m) {
                                               ConstantInt::get(builder.getInt64Ty(), cursor));
           llvm::Value *val = builder.CreateLoad(llvmType(pt),
                                                 builder.CreateBitCast(pp, PointerType::get(ctx, 0)));
-          auto *slot = builder.CreateAlloca(llvmType(pt), nullptr, sp->name);
+          auto *slot = allocaInEntry(llvmType(pt), sp->name);
           builder.CreateStore(val, slot);
           localSlots[sp->name] = slot;
         }
@@ -2119,7 +2130,7 @@ llvm::Value *Codegen::emitMatch(EMatch *m) {
       }
     } else if (arm.pattern->kind == Pattern::Var && !arm.pattern->enumDecl) {
       // whole-value binding
-      auto *slot = builder.CreateAlloca(llvmType(st), nullptr, arm.pattern->name);
+      auto *slot = allocaInEntry(llvmType(st), arm.pattern->name);
       builder.CreateStore(scrut, slot);
       localSlots[arm.pattern->name] = slot;
     }
@@ -2172,7 +2183,7 @@ void Codegen::emitStmt(Stmt *s) {
       break;
     }
     llvm::Type *lt = llvmType(l->resolvedType);
-    auto *slot = builder.CreateAlloca(lt, nullptr, l->name);
+    auto *slot = allocaInEntry(lt, l->name);
     if (l->init) {
       builder.CreateStore(emitExpr(l->init), slot);
     } else {
@@ -2282,7 +2293,7 @@ void Codegen::emitStmt(Stmt *s) {
       llvm::Value *start = emitExpr(r->lo);
       llvm::Value *end = emitExpr(r->hi);
       bool up = r->inclusive;
-      auto *ivar = builder.CreateAlloca(llvmType(itTy), nullptr, fi->varName);
+      auto *ivar = allocaInEntry(llvmType(itTy), fi->varName);
       builder.CreateStore(start, ivar);
       localSlots[fi->varName] = ivar;
       llvm::BasicBlock *condBB = llvm::BasicBlock::Create(ctx, "forin.cond", lf);
@@ -2313,8 +2324,8 @@ void Codegen::emitStmt(Stmt *s) {
       emitDebugLoc(s->loc);
       llvm::Function *lf = builder.GetInsertBlock()->getParent();
       Type *elemTy = arrTy->elem;
-      auto *evar = builder.CreateAlloca(llvmType(elemTy), nullptr, fi->varName);
-      auto *ivar = builder.CreateAlloca(builder.getInt64Ty(), nullptr, fi->varName + ".i");
+      auto *evar = allocaInEntry(llvmType(elemTy), fi->varName);
+      auto *ivar = allocaInEntry(builder.getInt64Ty(), fi->varName + ".i");
       builder.CreateStore(ConstantInt::get(builder.getInt64Ty(), 0), ivar);
       localSlots[fi->varName] = evar;
       llvm::BasicBlock *condBB = llvm::BasicBlock::Create(ctx, "forarr.cond", lf);
@@ -2330,7 +2341,7 @@ void Codegen::emitStmt(Stmt *s) {
       i = builder.CreateLoad(builder.getInt64Ty(), ivar);
       llvm::Value *arrAddr = emitLValue(fi->iterable);
       if (!arrAddr) {
-        auto *tmp = builder.CreateAlloca(llvmType(arrTy), nullptr, "forarr.tmp");
+        auto *tmp = allocaInEntry(llvmType(arrTy), "forarr.tmp");
         builder.CreateStore(arr, tmp);
         arrAddr = tmp;
       }

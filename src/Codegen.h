@@ -62,6 +62,7 @@ private:
 
   // ---- decls ----
   llvm::Function *declareFunc(DFunc *f, const std::vector<Type *> &genericArgs);
+  llvm::AllocaInst *allocaInEntry(llvm::Type *ty, const llvm::Twine &name);
   std::string funcSymbol(DFunc *f, const std::vector<Type *> &genericArgs);
   void emitFuncBody(DFunc *f, const std::vector<Type *> &genericArgs);
   llvm::GlobalVariable *globalFor(DGlobal *g);
