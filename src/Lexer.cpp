@@ -1,4 +1,5 @@
 #include "Lexer.h"
+#include <algorithm>
 
 namespace core {
 
@@ -223,17 +224,24 @@ std::vector<Token> Lexer::tokenizeAll() {
           t.intValue = strtoull(clean.c_str() + 2, nullptr, 8);
         else
           t.intValue = strtoull(clean.c_str(), nullptr, 10);
-        // detect >64-bit magnitude
+        // detect >64-bit magnitude (more than 19 decimal digits, or a hex
+        // literal of 17+ digits, cannot fit u64/i64 magnitude)
         std::string digitsOnly = clean;
-        size_t skip = 0;
-        while (skip < digitsOnly.size() && !isxdigit(digitsOnly[skip])) skip++;
-        std::string digits = digitsOnly.substr(skip);
-        if (digits.size() > 16) {
+        if (digitsOnly.rfind("0x", 0) == 0 || digitsOnly.rfind("0X", 0) == 0)
+          digitsOnly = digitsOnly.substr(2);
+        else if (digitsOnly.rfind("0b", 0) == 0 || digitsOnly.rfind("0B", 0) == 0)
+          digitsOnly = digitsOnly.substr(2);
+        else if (digitsOnly.rfind("0o", 0) == 0 || digitsOnly.rfind("0O", 0) == 0)
+          digitsOnly = digitsOnly.substr(2);
+        else if (digitsOnly.size() > 1 && digitsOnly[0] == '0' &&
+                 std::all_of(digitsOnly.begin() + 1, digitsOnly.end(),
+                             [](char ch) { return ch >= '0' && ch <= '7'; }))
+          digitsOnly = digitsOnly.substr(1);
+        if (digitsOnly.size() >= 20) {
           t.big128 = true;
-          // approximate: if it parses to the same value it fits
-          unsigned long long re = strtoull(digits.c_str(), nullptr, 16);
-          (void)re;
-          t.big128 = true;
+        } else if (digitsOnly.size() == 19) {
+          // 19 digits: fits u64 only if <= 18446744073709551615
+          if (digitsOnly > "18446744073709551615") t.big128 = true;
         }
       }
       out.push_back(t);

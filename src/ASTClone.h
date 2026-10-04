@@ -77,12 +77,14 @@ public:
       std::vector<Expr *> args;
       for (auto *a : c->args) args.push_back(expr(a));
       auto *n = ctx.make<ECall>(e->loc, expr(c->callee), std::move(args));
+      n->expectedType = c->expectedType;
       copyId(n, e);
       return n;
     }
     case Expr::Member: {
       auto *m = (EMember *)e;
       auto *n = ctx.make<EMember>(e->loc, expr(m->obj), m->name);
+      n->callTypeArgs = m->callTypeArgs; // shared TypeExprs (types are immutable)
       copyId(n, e);
       return n;
     }

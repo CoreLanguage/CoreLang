@@ -149,12 +149,14 @@ struct ECast : Expr {
 struct ECall : Expr {
   Expr *callee = nullptr;
   std::vector<Expr *> args;
+  Type *expectedType = nullptr; // context hint for generic inference (sema)
   ECall(SourceLoc l, Expr *c, std::vector<Expr *> a)
       : Expr(Call, l), callee(c), args(std::move(a)) {}
 };
 struct EMember : Expr {
   Expr *obj = nullptr;
   std::string name;
+  std::vector<TypeExpr *> callTypeArgs; // module.Func<T>(...): explicit generic args
   EMember(SourceLoc l, Expr *o, std::string n)
       : Expr(Member, l), obj(o), name(std::move(n)) {}
 };

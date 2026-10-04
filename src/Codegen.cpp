@@ -267,6 +267,15 @@ llvm::GlobalVariable *Codegen::globalFor(DGlobal *g) {
   llvm::Constant *init = Constant::getNullValue(lt);
   if (g->init) {
     init = evalConst(g->init);
+    // the literal may be typed narrower than the global (e.g. `0` -> i64 global)
+    if (init && init->getType() != lt) {
+      if (auto *ci = dyn_cast<ConstantInt>(init)) {
+        unsigned gbits = lt->isIntegerTy() ? lt->getIntegerBitWidth() : 0;
+        if (gbits) init = ConstantInt::get(ctx, ci->getValue().zextOrTrunc(gbits));
+      } else if (auto *cf = dyn_cast<ConstantFP>(init)) {
+        if (lt->isFloatTy() || lt->isDoubleTy()) init = ConstantFP::get(lt, cf->getValueAPF());
+      }
+    }
     if (!init) {
       diag.error(g->loc, strfmt("global '%s' requires a compile-time constant initializer",
                                 g->name.c_str()),
@@ -495,11 +504,13 @@ bool Codegen::generate(llvm::Module &module, ModuleSema *entryModule) {
     } else if (d->kind == Decl::Extern) {
       declareFunc(((DExtern *)d)->proto, {});
     } else if (d->kind == Decl::Class) {
-      for (DFunc *mth : ((DClass *)d)->methods)
-        if (mth->genericParams.empty()) declareFunc(mth, {});
+      auto *cd = (DClass *)d;
+      for (DFunc *mth : cd->methods)
+        if (mth->genericParams.empty() && cd->genericParams.empty()) declareFunc(mth, {});
     } else if (d->kind == Decl::Struct) {
-      for (DFunc *mth : ((DStruct *)d)->methods)
-        if (mth->genericParams.empty()) declareFunc(mth, {});
+      auto *sd = (DStruct *)d;
+      for (DFunc *mth : sd->methods)
+        if (mth->genericParams.empty() && sd->genericParams.empty()) declareFunc(mth, {});
     } else if (d->kind == Decl::Interface || d->kind == Decl::Trait) {
       for (DFunc *mth : ((DInterface *)d)->methods)
         if (mth->genericParams.empty() && mth->body) declareFunc(mth, {}); // trait defaults
@@ -524,11 +535,13 @@ bool Codegen::generate(llvm::Module &module, ModuleSema *entryModule) {
           auto *f = (DFunc *)d;
           if (f->genericParams.empty()) emitFuncBody(f, {});
         } else if (d->kind == Decl::Class) {
-          for (DFunc *mth : ((DClass *)d)->methods)
-            if (mth->genericParams.empty()) emitFuncBody(mth, {});
+          auto *cd = (DClass *)d;
+          for (DFunc *mth : cd->methods)
+            if (mth->genericParams.empty() && cd->genericParams.empty()) emitFuncBody(mth, {});
         } else if (d->kind == Decl::Struct) {
-          for (DFunc *mth : ((DStruct *)d)->methods)
-            if (mth->genericParams.empty()) emitFuncBody(mth, {});
+          auto *sd = (DStruct *)d;
+          for (DFunc *mth : sd->methods)
+            if (mth->genericParams.empty() && sd->genericParams.empty()) emitFuncBody(mth, {});
         } else if (d->kind == Decl::Interface || d->kind == Decl::Trait) {
           for (DFunc *mth : ((DInterface *)d)->methods)
             if (mth->genericParams.empty() && mth->body) emitFuncBody(mth, {});
@@ -1294,15 +1307,31 @@ llvm::Value *Codegen::emitCall(ECall *c) {
         }
         return ccall(impl, args, "call.base");
       }
-      // generic method?
-      if (!f->genericParams.empty() && c->genInstance) {
+      // monomorphized instance (generic method, or method of a generic receiver)?
+      if (c->genInstance) {
         GenericInstance *gi = (GenericInstance *)c->genInstance;
         llvm::Function *impl = declareFunc(gi->clonedFunc, gi->args);
         llvm::Value *self = emitSelfArg(m->obj);
         std::vector<llvm::Value *> args{self};
-        for (size_t ai = 0; ai < gi->clonedFunc->params.size(); ai++) {
-          if (ai < c->args.size()) args.push_back(emitExpr(c->args[ai]));
-          else if (gi->clonedFunc->params[ai].defVal) args.push_back(emitExpr(gi->clonedFunc->params[ai].defVal));
+        std::vector<Type *> wantTys;
+        for (auto &p : gi->clonedFunc->params) {
+          // instance params carry enclosing + own generic bindings
+          std::map<std::string, Type *> isub;
+          for (size_t xi = 0; xi < gi->clonedFunc->genericParams.size() && xi < gi->args.size(); xi++)
+            isub[gi->clonedFunc->genericParams[xi]] = gi->args[xi];
+          auto *saved = sema.subst;
+          sema.subst = &isub;
+          wantTys.push_back(sema.resolveType(p.type));
+          sema.subst = saved;
+        }
+        for (size_t ai = 0; ai < wantTys.size(); ai++) {
+          if (ai < c->args.size()) {
+            llvm::Value *v = emitExpr(c->args[ai]);
+            args.push_back(coerceValue(v, wantTys[ai], c->args[ai]->type));
+          } else if (gi->clonedFunc->params[ai].defVal) {
+            llvm::Value *v = emitExpr(gi->clonedFunc->params[ai].defVal);
+            args.push_back(coerceValue(v, wantTys[ai], gi->clonedFunc->params[ai].defVal->type));
+          }
         }
         return ccall(impl, args, "call.method");
       }

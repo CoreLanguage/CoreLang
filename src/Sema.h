@@ -144,7 +144,9 @@ public:
                          SourceLoc loc, const std::string &name, bool &ok);
   bool typesAssignable(Type *dst, Type *src, Expr *srcExpr, SourceLoc loc, const std::string &what);
   bool isLValue(Expr *e);
-  GenericInstance *instantiateGeneric(DFunc *tmpl, const std::vector<Type *> &args, SourceLoc loc);
+  GenericInstance *instantiateGeneric(DFunc *tmpl, const std::vector<Type *> &args, SourceLoc loc,
+                                      const std::vector<std::string> &enclosingParams = {},
+                                      const std::vector<Type *> &enclosingArgs = {});
   Type *checkMemberForRead(EMember *m);
   Type *resolveEnumArgs(DEnum *e, std::vector<Type *> args);
   DEnum *enumOf(Type *t) { return t && t->isEnum() ? (DEnum *)t->decl : nullptr; }

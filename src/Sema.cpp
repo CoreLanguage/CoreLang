@@ -450,9 +450,17 @@ std::string Sema::mangleFuncName(DFunc *f, const std::vector<Type *> &genericArg
   }
   out += std::to_string(f->name.size()) + f->name;
   // parameter types disambiguate overloads (and specialize generics);
-  // resolution is quiet: unresolved (template) params use a placeholder
+  // resolved under the FUNCTION'S OWN generic substitution so callers and
+  // definitions produce the same symbol
   std::vector<Type *> ptypes;
   bool ptypesOk = true;
+  std::map<std::string, Type *> ownSubst;
+  auto *savedMangleSubst = subst;
+  if (!f->genericParams.empty() && !genericArgs.empty()) {
+    for (size_t gi2 = 0; gi2 < f->genericParams.size() && gi2 < genericArgs.size(); gi2++)
+      ownSubst[f->genericParams[gi2]] = genericArgs[gi2];
+    subst = &ownSubst;
+  }
   quiet_++;
   for (auto &p : f->params) {
     Type *pt = resolveType(p.type);
@@ -460,6 +468,7 @@ std::string Sema::mangleFuncName(DFunc *f, const std::vector<Type *> &genericArg
     ptypes.push_back(pt);
   }
   quiet_--;
+  subst = savedMangleSubst;
   if (ptypesOk && !f->isExtern) {
     out += "I";
     for (size_t pi = 0; pi < ptypes.size(); pi++)
@@ -817,11 +826,13 @@ bool Sema::checkAll() {
         auto *f = (DFunc *)d;
         if (f->parent == nullptr && f->genericParams.empty()) checkFuncDecl(f, {});
       } else if (d->kind == Decl::Class) {
-        for (DFunc *mth : ((DClass *)d)->methods)
-          if (mth->genericParams.empty()) checkFuncDecl(mth, {});
+        auto *cd = (DClass *)d;
+        for (DFunc *mth : cd->methods)
+          if (mth->genericParams.empty() && cd->genericParams.empty()) checkFuncDecl(mth, {});
       } else if (d->kind == Decl::Struct) {
-        for (DFunc *mth : ((DStruct *)d)->methods)
-          if (mth->genericParams.empty()) checkFuncDecl(mth, {});
+        auto *sd = (DStruct *)d;
+        for (DFunc *mth : sd->methods)
+          if (mth->genericParams.empty() && sd->genericParams.empty()) checkFuncDecl(mth, {});
       } else if (d->kind == Decl::Interface || d->kind == Decl::Trait) {
         for (DFunc *mth : ((DInterface *)d)->methods)
           if (mth->genericParams.empty() && mth->body) checkFuncDecl(mth, {});
@@ -835,7 +846,16 @@ bool Sema::checkAll() {
       } else if (d->kind == Decl::Const) {
         auto *c = (DConst *)d;
         if (c->type) resolveType(c->type);
-        if (c->init) checkExpr(c->init);
+        if (c->init) {
+          checkExpr(c->init);
+          // retype the initializer to the declared const type so codegen
+          // emits constants at the right width (say Z: i64 -> i64 42, not i32)
+          if (c->type) {
+            Type *ct = resolveType(c->type);
+            if (ct && c->init->type && !tc.same(ct, c->init->type))
+              typesAssignable(ct, c->init->type, c->init, c->loc, "const initializer");
+          }
+        }
       }
     }
   }
@@ -994,6 +1014,10 @@ void Sema::checkStmt(Stmt *s) {
     auto *l = (SLet *)s;
     Type *declTy = l->type ? resolveType(l->type) : nullptr;
     if (l->init) {
+      // context hint: let a generic call bind its type params from the
+      // declared type (`mut p: ptr<U> = alloc_array<U>(1)`)
+      if (l->init->kind == Expr::Call && declTy)
+        ((ECall *)l->init)->expectedType = declTy;
       checkExpr(l->init);
       Type *it = l->init->type;
       if (!it) return;
@@ -1093,6 +1117,7 @@ void Sema::checkStmt(Stmt *s) {
     auto *r = (SReturn *)s;
     if (!curFunc) return;
     if (r->e) {
+      if (r->e->kind == Expr::Call && curReturnType) ((ECall *)r->e)->expectedType = curReturnType;
       checkExpr(r->e);
       Type *rt = r->e->type;
       if (!rt) return;
@@ -2341,6 +2366,10 @@ Type *Sema::checkCall(ECall *call) {
   std::string name;
   std::vector<DFunc *> candidates;
   bool viaModule = false;
+  EMember *calleeMember = callee->kind == Expr::Member ? (EMember *)callee : nullptr;
+  std::map<std::string, Type *> methodSubst;   // receiver's generic bindings
+  bool haveMethodSubst = false;
+  std::map<std::string, Type *> *methodSubstOwner = nullptr;
 
   if (callee->kind == Expr::Ident) {
     auto *id = (EIdent *)callee;
@@ -2366,7 +2395,7 @@ Type *Sema::checkCall(ECall *call) {
       std::vector<Type *> gargs;
       for (auto *gte : id->typeArgs->genericArgs) {
         Type *gt = resolveType(gte);
-        if (!gt) return nullptr;
+                if (!gt) return nullptr;
         gargs.push_back(gt);
       }
       // arity check
@@ -2467,6 +2496,20 @@ Type *Sema::checkCall(ECall *call) {
           return nullptr;
         }
         m->memberKind = MemberKind::Method;
+        // methods of GENERIC types: resolve signatures under the receiver's
+        // instance arguments (e.g. DynArray<i64>.push: T -> i64)
+        if (!derefTy->genericArgs.empty()) {
+          std::vector<std::string> gps;
+          if (derefTy->isClass()) gps = ((DClass *)derefTy->decl)->genericParams;
+          else gps = ((DStruct *)derefTy->decl)->genericParams;
+          if (gps.size() == derefTy->genericArgs.size()) {
+            for (size_t gi2 = 0; gi2 < gps.size(); gi2++)
+              methodSubst[gps[gi2]] = derefTy->genericArgs[gi2];
+            haveMethodSubst = true;
+            methodSubstOwner = subst;
+            subst = &methodSubst;
+          }
+        }
       } else {
         diag.error(m->loc, strfmt("value of type '%s' has no methods", typeToString(ot).c_str()));
         return nullptr;
@@ -2486,6 +2529,59 @@ Type *Sema::checkCall(ECall *call) {
                        "mark it `pub func %s(...)` in module " + id->name, 1);
             return nullptr;
           }
+        // module.Func<T>(...): explicit generic arguments
+        if (!m->callTypeArgs.empty()) {
+          for (auto *a : call->args) checkExpr(a);
+          DFunc *gtmpl = nullptr;
+          for (DFunc *g : fit->second)
+            if (!g->genericParams.empty()) gtmpl = g;
+          if (!gtmpl) {
+            diag.error(call->loc, strfmt("'%s.%s' is not generic but type arguments were given",
+                                         id->name.c_str(), m->name.c_str()));
+            return nullptr;
+          }
+          if (m->callTypeArgs.size() != gtmpl->genericParams.size()) {
+            diag.error(call->loc, strfmt("'%s.%s' expects %zu type arguments, got %zu",
+                                         id->name.c_str(), m->name.c_str(),
+                                         gtmpl->genericParams.size(), m->callTypeArgs.size()));
+            return nullptr;
+          }
+          std::vector<Type *> gargs;
+          for (auto *gte : m->callTypeArgs) {
+            Type *gt = resolveType(gte);
+            if (!gt) return nullptr;
+            gargs.push_back(gt);
+          }
+          if (call->args.size() != gtmpl->params.size()) {
+            diag.error(call->loc, strfmt("'%s.%s' expects %zu arguments, got %zu", id->name.c_str(),
+                                         m->name.c_str(), gtmpl->params.size(), call->args.size()));
+            return nullptr;
+          }
+          std::map<std::string, Type *> sub;
+          for (size_t gi2 = 0; gi2 < gtmpl->genericParams.size(); gi2++)
+            sub[gtmpl->genericParams[gi2]] = gargs[gi2];
+          auto *savedSub = subst;
+          subst = &sub;
+          for (size_t ai = 0; ai < call->args.size(); ai++) {
+            Type *want = resolveType(gtmpl->params[ai].type);
+            if (!typesAssignable(want, call->args[ai]->type, call->args[ai], call->args[ai]->loc, "argument")) {
+              subst = savedSub;
+              return nullptr;
+            }
+          }
+          subst = savedSub;
+          GenericInstance *gi = instantiateGeneric(gtmpl, gargs, call->loc);
+          if (!gi) return nullptr;
+          call->genInstance = gi;
+          m->resolvedFunc = gtmpl;
+          m->memberKind = MemberKind::ModuleMember;
+          m->viaModule = mod;
+          auto *savedRet = subst;
+          subst = &sub;
+          Type *ret = gtmpl->retType ? resolveType(gtmpl->retType) : tc.prim(PRIM_void);
+          subst = savedRet;
+          return ret;
+        }
         candidates = fit->second;
         name = m->name;
         m->memberKind = MemberKind::ModuleMember;
@@ -2557,7 +2653,77 @@ Type *Sema::checkCall(ECall *call) {
 
   bool ok = false;
   DFunc *chosen = resolveOverload(candidates, call->args, call->loc, name, ok);
-  if (!ok || !chosen) return nullptr;
+  if (!ok || !chosen) {
+    if (haveMethodSubst) subst = methodSubstOwner;
+    return nullptr;
+  }
+  // method of a GENERIC receiver: monomorphize per receiver instance.
+  // The receiver's type args become enclosing substitution; the method's own
+  // type params (if any) are still inferred from the argument types.
+  if (haveMethodSubst && !chosen->isExtern) {
+    subst = methodSubstOwner;
+    std::vector<std::string> enclosingParams;
+    std::vector<Type *> enclosingArgs;
+    for (auto &kv : methodSubst) { enclosingParams.push_back(kv.first); enclosingArgs.push_back(kv.second); }
+    if (chosen->genericParams.empty()) {
+      // fully concrete instance: no inference needed
+      GenericInstance *gi = instantiateGeneric(chosen, {}, call->loc, enclosingParams, enclosingArgs);
+      if (!gi) return nullptr;
+      call->genInstance = gi;
+      call->resolvedFunc = chosen;
+      calleeMember->resolvedFunc = chosen;
+      auto *savedRet = subst;
+      subst = &methodSubst;
+      Type *ret = chosen->retType ? resolveType(chosen->retType) : tc.prim(PRIM_void);
+      subst = savedRet;
+      // literal coercions against the instance signature
+      quiet_++;
+      for (size_t ai = 0; ai < call->args.size() && ai < chosen->params.size(); ai++) {
+        subst = &methodSubst;
+        Type *want = resolveType(chosen->params[ai].type);
+        subst = savedRet;
+        Type *got = call->args[ai]->type;
+        if (!want || !got || tc.same(want, got)) continue;
+        bool foldOk = true;
+        unsigned long long fv = evalConstUint(call->args[ai], foldOk);
+        if (foldOk && want->isInt() && got->isInt()) continue;
+        typesAssignable(want, got, call->args[ai], call->args[ai]->loc, "argument");
+      }
+      quiet_--;
+      return ret;
+    }
+    // method with own generic params: infer them under receiver substitution
+    std::map<std::string, Type *> vars = methodSubst;
+    std::vector<Type *> ownVars;
+    for (auto &gp : chosen->genericParams) { Type *v = tc.genericVar(gp); vars[gp] = v; ownVars.push_back(v); }
+    bool inferOk = true;
+    for (size_t pi = 0; pi < chosen->params.size() && pi < call->args.size(); pi++) {
+      subst = &vars;
+      Type *want = resolveType(chosen->params[pi].type);
+      subst = methodSubstOwner;
+      Type *got = call->args[pi]->type;
+      if (!unifyTypes(want, got, vars)) { inferOk = false; break; }
+    }
+    if (!inferOk) return nullptr;
+    std::vector<Type *> gargs;
+    for (auto *v : ownVars) {
+      if (v->isNamedGeneric) {
+        diag.error(call->loc, strfmt("cannot infer type parameter for '%s'; add explicit type annotation", name.c_str()));
+        return nullptr;
+      }
+      gargs.push_back(v);
+    }
+    GenericInstance *gi = instantiateGeneric(chosen, gargs, call->loc, enclosingParams, enclosingArgs);
+    if (!gi) return nullptr;
+    call->genInstance = gi;
+    call->resolvedFunc = chosen;
+    calleeMember->resolvedFunc = chosen;
+    auto *savedRet = subst;
+    subst = &vars;
+    Type *ret = chosen->retType ? resolveType(chosen->retType) : tc.prim(PRIM_void);
+    subst = savedRet;
+    return ret;
+  }
   call->resolvedFunc = chosen;
   // finalize literal coercions against the chosen overload; constant-foldable
   // arguments (e.g. `4 * 10`) are accepted for in-range integer params (the
@@ -2586,7 +2752,9 @@ Type *Sema::checkCall(ECall *call) {
   // generic instantiation
   if (!chosen->genericParams.empty()) {
     std::map<std::string, Type *> vars;
-    for (auto &gp : chosen->genericParams) vars[gp] = tc.genericVar(gp);
+    for (auto &gp : chosen->genericParams) {
+      vars[gp] = tc.genericVar(gp);
+    }
     auto *savedSubst = subst;
     subst = &vars;
     std::vector<Type *> gargs;
@@ -2596,8 +2764,25 @@ Type *Sema::checkCall(ECall *call) {
       Type *got = call->args[pi]->type;
       if (!unifyTypes(want, got, vars)) { inferOk = false; break; }
     }
+    // unresolved vars: bind from the expected context type (declared var
+    // type / return type), e.g. `mut p: ptr<U> = alloc_zeroed_array<U>(1)`
+    if (inferOk && call->expectedType) {
+      Type *hint = call->expectedType;
+      if (!hint->isNamedGeneric) {
+        // unify the hint against the callee's return type under vars: binds
+        // remaining vars, e.g. `mut p: ptr<U> = alloc_zeroed_array<U>(1)`
+        subst = &vars;
+        Type *retT = chosen->retType ? resolveType(chosen->retType) : nullptr;
+        subst = savedSubst;
+        if (retT && !retT->isVoid() && !retT->isNamedGeneric)
+          unifyTypes(retT, hint, vars);
+        else if (retT && retT->isNamedGeneric) {
+          auto it = vars.find(retT->genericVarName);
+          if (it != vars.end() && it->second->isNamedGeneric) it->second = hint;
+        }
+      }
+    }
     subst = savedSubst;
-    if (!inferOk) return nullptr;
     gargs.clear();
     for (auto &gp : chosen->genericParams) {
       auto it = vars.find(gp);
@@ -2668,8 +2853,16 @@ bool Sema::unifyTypes(Type *want, Type *got, std::map<std::string, Type *> &vars
   return false;
 }
 
-GenericInstance *Sema::instantiateGeneric(DFunc *tmpl, const std::vector<Type *> &args, SourceLoc loc) {
-  std::string key = mangleFuncName(tmpl, args);
+GenericInstance *Sema::instantiateGeneric(DFunc *tmpl, const std::vector<Type *> &args, SourceLoc loc,
+                                          const std::vector<std::string> &enclosingParams,
+                                          const std::vector<Type *> &enclosingArgs) {
+  // enclosing substitution (generic receiver, e.g. methods of DynArray<T>)
+  // is prepended to the template's own type parameters
+  std::vector<std::string> allParams = enclosingParams;
+  for (auto &gp : tmpl->genericParams) allParams.push_back(gp);
+  std::vector<Type *> allArgs = enclosingArgs;
+  for (auto *a : args) allArgs.push_back(a);
+  std::string key = mangleFuncName(tmpl, allArgs);
   auto kkey = std::make_pair(tmpl, key);
   auto it = instances.find(kkey);
   if (it != instances.end()) return it->second;
@@ -2683,7 +2876,7 @@ GenericInstance *Sema::instantiateGeneric(DFunc *tmpl, const std::vector<Type *>
 
   auto *gi = new GenericInstance();
   gi->tmpl = tmpl;
-  gi->args = args;
+  gi->args = allArgs; // own + enclosing (receiver) type args
   gi->mangledName = key;
   instances[kkey] = gi;
   instanceOrder.push_back(gi);
@@ -2693,7 +2886,7 @@ GenericInstance *Sema::instantiateGeneric(DFunc *tmpl, const std::vector<Type *>
   ASTCloner cloner(cloneArena);
   DFunc *clone = cloneArena.make<DFunc>(tmpl->loc);
   clone->name = tmpl->name;
-  clone->genericParams = tmpl->genericParams; // keeps subst active in codegen
+  clone->genericParams = allParams; // keeps subst active in codegen (receiver + own params)
   clone->parent = tmpl->parent;
   { // the clone belongs to the template's defining module
     auto fm = funcModule.find(tmpl);
@@ -2706,8 +2899,9 @@ GenericInstance *Sema::instantiateGeneric(DFunc *tmpl, const std::vector<Type *>
   cloner.funcBody(tmpl, clone);
 
   std::map<std::string, Type *> sub;
-  for (size_t i = 0; i < tmpl->genericParams.size() && i < args.size(); i++)
-    sub[tmpl->genericParams[i]] = args[i];
+  for (size_t i = 0; i < allParams.size() && i < allArgs.size(); i++) {
+    sub[allParams[i]] = allArgs[i];
+  }
   checkFuncDecl(clone, sub);
 
   gi->clonedFunc = clone;

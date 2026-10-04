@@ -525,6 +525,15 @@ Expr *Parser::parsePrimary(bool noStructLit) {
       sl->loc = l;
       return sl;
     }
+    // module.Func<T>(...): explicit generic args on a module-qualified call
+    if (hasGenerics && atPunct("(") && parts.size() >= 2) {
+      Expr *e2 = ctx.make<EIdent>(l, parts[0]);
+      for (size_t k = 1; k + 1 < parts.size(); k++)
+        e2 = ctx.make<EMember>(e2->loc, e2, parts[k]);
+      auto *m = ctx.make<EMember>(l, e2, parts[parts.size() - 1]);
+      m->callTypeArgs = gargs;
+      return m;
+    }
     // plain (possibly dotted) identifier
     Expr *e = ctx.make<EIdent>(l, parts[0]);
     if (hasGenerics) {
@@ -1023,7 +1032,6 @@ DStruct *Parser::parseStruct(bool isPub, bool packed) {
       errorAt(loc(), "unexpected end of file inside struct", "", 0);
       return nullptr;
     }
-    if (getenv("CORE_DBG")) fprintf(stderr, "[struct] loop top, tk='%s' kind=%d\n", tk().text.c_str(), (int)tk().kind);
     unsigned smethods = 0;
     while (atKw("pub") || atKw("static")) {
       std::string m = advance().text;
@@ -1046,7 +1054,6 @@ DStruct *Parser::parseStruct(bool isPub, bool packed) {
         if (!defVal) return nullptr;
       }
       s->fields.push_back({fn.text, ty, defVal, fn.loc});
-      if (getenv("CORE_DBG")) fprintf(stderr, "[struct] field %s ok, next=%s\n", fn.text.c_str(), tk().text.c_str());
     }
     if (at(Tok::Newline)) { skipNewlines(); continue; }
     if (atPunct(",")) { advance(); skipNewlines(); continue; }
