@@ -15,11 +15,10 @@
 set -euo pipefail
 
 PREFIX="${CORE_INSTALL_PREFIX:-/usr/local}"
-# Where to download from. Order tried:
-#   1. CORE_RELEASE_URL, if set (a GitHub release, a mirror, anywhere)
-#   2. GitHub latest release (works when the repo is public, or when
-#      GH_TOKEN is exported - the script sends it as a bearer token)
-BASE_URL="${CORE_RELEASE_URL:-https://github.com/snitchbossdotcom/corelang/releases/latest/download}"
+# Where to download from. The tarballs live in the repository itself
+# (dist/core-linux-<arch>.tar.gz), fetched from raw.githubusercontent.com.
+# Override with CORE_RELEASE_URL to serve from anywhere else.
+BASE_URL="${CORE_RELEASE_URL:-https://raw.githubusercontent.com/snitchbossdotcom/corelang/main/dist}"
 AUTH=()
 if [[ -n "${GH_TOKEN:-}" ]]; then
   AUTH=(-H "Authorization: Bearer $GH_TOKEN")

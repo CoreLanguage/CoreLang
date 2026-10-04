@@ -21,18 +21,17 @@ What the script does:
 the script before piping it into a shell; that is always the right
 reflex.
 
-The repository is currently private, so the download needs
-authentication. Export a token with the `repo` scope first:
+The tarballs are stored in the repository at `dist/`, so while the repo
+is private the download needs authentication. Export a token with the
+`repo` scope first:
 
 ```console
 export GH_TOKEN=ghp_yourtoken
-curl -fsSL https://raw.githubusercontent.com/snitchbossdotcom/corelang/main/install.sh | bash
+curl -H "Authorization: Bearer $GH_TOKEN" -fsSL \
+  https://raw.githubusercontent.com/snitchbossdotcom/corelang/main/install.sh | bash
 ```
 
-(The raw.githubusercontent fetch of the script itself needs the token
-too when the repo is private: `curl -H "Authorization: Bearer $GH_TOKEN"
--fsSL ...`.) Once the repo is public, or a release exists, the plain
-one-liner works with no token.
+Once the repository is public, the plain one-liner works with no token.
 
 Alternatives:
 
