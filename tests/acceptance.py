@@ -156,23 +156,13 @@ func main() {
 
     # 24-28: documentation + design constraints (static checks)
     docs_needed = [
-        "docs/learning/introduction.md", "docs/learning/installation.md",
-        "docs/learning/first-project.md", "docs/learning/variables.md",
-        "docs/learning/types.md", "docs/learning/operators.md",
-        "docs/learning/control-flow.md", "docs/learning/functions.md",
-        "docs/learning/arrays.md", "docs/learning/strings.md",
-        "docs/learning/structs.md", "docs/learning/pointers.md",
-        "docs/learning/references.md", "docs/learning/memory-management.md",
-        "docs/learning/classes.md", "docs/learning/oop.md",
-        "docs/learning/generics.md", "docs/learning/enums.md",
-        "docs/learning/error-handling.md", "docs/learning/data-structures.md",
-        "docs/learning/algorithms.md", "docs/learning/modules.md",
-        "docs/learning/projects.md", "docs/learning/packages.md",
-        "docs/learning/concurrency.md", "docs/learning/ffi.md",
-        "docs/learning/unsafe.md", "docs/learning/inline-assembly.md",
-        "docs/learning/low-level-programming.md",
-        "docs/learning/freestanding-development.md",
-        "docs/learning/os-development.md",
+        "docs/guide/getting-started.md", "docs/guide/installation.md",
+        "docs/guide/syntax.md", "docs/guide/types.md",
+        "docs/guide/functions.md", "docs/guide/control-flow.md",
+        "docs/guide/memory.md", "docs/guide/structs-and-enums.md",
+        "docs/guide/oop.md", "docs/guide/generics.md",
+        "docs/guide/modules-and-packages.md", "docs/guide/stdlib.md",
+        "docs/guide/unsafe-and-low-level.md", "docs/guide/command-line.md",
         "docs/language/SPEC.md", "docs/language/memory-model.md",
         "docs/language/abi.md",
         "docs/compiler/architecture.md", "docs/compiler/lexer.md",
@@ -187,7 +177,7 @@ func main() {
     ]
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     missing = [d for d in docs_needed if not os.path.exists(os.path.join(root, d))]
-    ok("24. learning documentation complete for a beginner (31 files)",
+    ok("24. guide documentation complete for a beginner (14 files)",
        len(missing) == 0, "missing: " + ", ".join(missing))
     ok("25. compiler documentation complete for future developers",
        all(os.path.exists(os.path.join(root, d)) for d in

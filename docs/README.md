@@ -3,12 +3,19 @@
 Welcome! Here is where to start, by goal:
 
 ## "I want to learn Core"
-- [learning/introduction.md](learning/introduction.md) — what Core is and why it exists
-- [learning/installation.md](learning/installation.md) — build the compiler
-- [learning/first-project.md](learning/first-project.md) — `core init`, first build & run
-- Then follow the tutorials in order (variables → types → ... → os-development).
-  Every tutorial has syntax, worked examples, common mistakes, exercises, and
-  performance notes.
+- [guide/getting-started.md](guide/getting-started.md) — install, hello world, the toolchain
+- [guide/syntax.md](guide/syntax.md) — the whole grammar in one page
+- [guide/types.md](guide/types.md) — every type, literals, conversion rules
+- [guide/functions.md](guide/functions.md) — params, returns, overloads, generics, closures
+- [guide/control-flow.md](guide/control-flow.md) — if/while/for/match
+- [guide/memory.md](guide/memory.md) — pointers, alloc/free, unsafe, what is UB
+- [guide/structs-and-enums.md](guide/structs-and-enums.md) — value types, methods, tagged unions
+- [guide/oop.md](guide/oop.md) — classes, inheritance, interfaces, traits
+- [guide/generics.md](guide/generics.md) — monomorphization and type inference
+- [guide/modules-and-packages.md](guide/modules-and-packages.md) — imports, visibility, core.toml
+- [guide/stdlib.md](guide/stdlib.md) — what the standard library actually contains
+- [guide/unsafe-and-low-level.md](guide/unsafe-and-low-level.md) — unsafe, volatile/MMIO, inline asm, FFI
+- [guide/command-line.md](guide/command-line.md) — every `core` subcommand and flag
 
 ## "I want the precise rules"
 - [language/SPEC.md](language/SPEC.md) — the normative language specification
