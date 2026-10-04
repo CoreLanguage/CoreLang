@@ -15,7 +15,15 @@
 set -euo pipefail
 
 PREFIX="${CORE_INSTALL_PREFIX:-/usr/local}"
+# Where to download from. Order tried:
+#   1. CORE_RELEASE_URL, if set (a GitHub release, a mirror, anywhere)
+#   2. GitHub latest release (works when the repo is public, or when
+#      GH_TOKEN is exported - the script sends it as a bearer token)
 BASE_URL="${CORE_RELEASE_URL:-https://github.com/snitchbossdotcom/corelang/releases/latest/download}"
+AUTH=()
+if [[ -n "${GH_TOKEN:-}" ]]; then
+  AUTH=(-H "Authorization: Bearer $GH_TOKEN")
+fi
 
 say()  { printf '%s\n' "$*"; }
 ok()   { printf '\033[1;32m ok\033[0m %s\n' "$*"; }
@@ -56,8 +64,14 @@ done
 [[ -n "$FETCH" ]] || fail "neither curl nor wget found - install one and retry"
 
 case "$FETCH" in
-    curl) curl -fSL --retry 3 -o "$TMP/$TARBALL" "$URL" || fail "download failed: $URL" ;;
-    wget) wget -q -O "$TMP/$TARBALL" "$URL" || fail "download failed: $URL" ;;
+    curl) curl -fSL --retry 3 "${AUTH[@]}" -o "$TMP/$TARBALL" "$URL" || \
+            fail "download failed: $URL
+If the repo is private, export GH_TOKEN=<your token> with the repo scope,
+or set CORE_RELEASE_URL to a location you control." ;;
+    wget) wget -q --header="${AUTH:+Authorization: Bearer $GH_TOKEN}" -O "$TMP/$TARBALL" "$URL" || \
+            fail "download failed: $URL
+If the repo is private, export GH_TOKEN=<your token> with the repo scope,
+or set CORE_RELEASE_URL to a location you control." ;;
 esac
 
 # ------------------------------------------------------------ unpack --------

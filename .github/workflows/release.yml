@@ -1,0 +1,28 @@
+# Builds release tarballs for every supported architecture and attaches
+# them to a GitHub release. Triggered by pushing a v* tag.
+name: release
+on:
+  push:
+    tags: ["v*"]
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - { os: ubuntu-24.04, arch: x86_64 }
+          - { os: ubuntu-24.04-arm, arch: aarch64 }
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: install LLVM 18
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake llvm-18-dev clang libzstd-dev python3
+      - name: build release tarball
+        run: ./scripts/build-release.sh
+      - name: upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/core-linux-*.tar.gz
