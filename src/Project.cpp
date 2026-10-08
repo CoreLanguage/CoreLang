@@ -415,11 +415,14 @@ static bool setupProjectDriver(DriverOptions &opts, Manifest &m, Diagnostics &di
     }
     if (!fetchPackage(spec, checkout, version, commit, diag)) return false;
     opts.packageSrcDirs.push_back(checkout);
-    // dependency's own dependencies
+    // the dependency's declared source-dir is on the import path too
+    // (a package with source-dir = "src" exports <checkout>/src/x.cr as x)
     Manifest dm;
     SourceMgr sm;
     Diagnostics d(sm);
     if (loadManifest(joinPath(checkout, "core.toml"), dm, d)) {
+      if (!dm.sourceDir.empty() && dm.sourceDir != ".")
+        opts.packageSrcDirs.push_back(joinPath(checkout, dm.sourceDir));
       for (auto &dd : dm.dependencies) {
         std::string c2, v2, cm2;
         std::string spec2 = dd.repo + (dd.version.empty() ? "" : "@" + dd.version);
