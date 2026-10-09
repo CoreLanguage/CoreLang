@@ -15,7 +15,7 @@ import json
 import os
 import re
 import sys
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, unquote
 
 DATA = os.environ.get("REGISTRY_DATA", os.path.join(os.path.dirname(__file__), "data"))
@@ -40,6 +40,7 @@ def save_index(idx):
 
 class Handler(BaseHTTPRequestHandler):
     server_version = "CoreRegistry/0.1"
+    timeout = 10  # drop slowloris-style half-open connections
 
     def log_message(self, *a):
         sys.stderr.write("%s - %s\n" % (self.address_string(), a[0] % a[1:]))
@@ -131,4 +132,6 @@ if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
     os.makedirs(DATA, exist_ok=True)
     print(f"core-registry serving {DATA} on :{port}", flush=True)
-    HTTPServer(("0.0.0.0", port), Handler).serve_forever()
+    srv = ThreadingHTTPServer(("0.0.0.0", port), Handler)
+    srv.daemon_threads = True
+    srv.serve_forever()
