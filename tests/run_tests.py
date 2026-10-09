@@ -562,6 +562,66 @@ def test_packages(w):
         lock = f.read()
     check("core remove clears the lock entry", "coolstrings" not in lock, lock)
 
+    # --- dependency source-dir handling (repos live outside the project dir) ---
+    def make_pkg(name, version, srcdir, module_src, source_dir_key="", deps=None):
+        pkg = os.path.join(w, "mockrepo", name)
+        os.makedirs(os.path.join(pkg, srcdir))
+        run(["git", "init", "-q", "."], cwd=pkg)
+        with open(os.path.join(pkg, "core.toml"), "w") as f:
+            f.write(f'[package]\nname = "{name}"\nversion = "{version}"\n{source_dir_key}')
+            if deps:
+                f.write("\n[dependencies]\n" + deps)
+        with open(os.path.join(pkg, srcdir, f"{name}.cr"), "w") as f:
+            f.write(module_src)
+        run(["git", "add", "-A"], cwd=pkg)
+        run(["git", "commit", "-qm", name], cwd=pkg)
+        run(["git", "tag", "v" + version], cwd=pkg)
+        return pkg
+
+    # dep with a src/ layout and no explicit source-dir (the default applies)
+    util = make_pkg("coolutil", "1.0.0", "src",
+                    'pub func dbl(x: i32) -> i32 { return x * 2 }\n')
+    # dep with an explicitly configured source-dir
+    api = make_pkg("coolapi", "0.5.0", "lib",
+                   'pub func tag() -> string { return "api" }\n',
+                   'source-dir = "lib"\n')
+    # nested dep: coolnet imports coolbase; neither declares source-dir
+    base = make_pkg("coolbase", "1.2.0", "src",
+                    'pub func b() -> string { return "base" }\n')
+    net = make_pkg("coolnet", "1.0.0", "src",
+                   'import coolbase\n\npub func n() -> string { return "net:" + coolbase.b() }\n',
+                   deps=f'coolbase = "{base}"\n')
+
+    proj2 = os.path.join(w, "srcdirproj")
+    os.makedirs(proj2)
+    run([CORE, "init", "srcdirapp"], cwd=proj2)
+    with open(os.path.join(proj2, "src", "main.cr"), "w") as f:
+        f.write('import coolutil\nimport coolapi\n\n'
+                'func main() {\n    say coolutil.dbl(21)\n    say coolapi.tag()\n}\n')
+    r = run([CORE, "install", util], cwd=proj2)
+    check("install dep with default src/ layout", r.returncode == 0, r.stdout + r.stderr)
+    r = run([CORE, "install", api], cwd=proj2)
+    check("install dep with explicit source-dir", r.returncode == 0, r.stdout + r.stderr)
+    r = run([CORE, "build"], cwd=proj2)
+    check("root project with default source-dir builds against deps", r.returncode == 0,
+          r.stderr)
+    rr = run(["./srcdirapp"], cwd=proj2)
+    check("default src/ and explicit source-dir deps resolve",
+          rr.stdout.strip().splitlines() == ["42", "api"], rr.stdout + rr.stderr)
+
+    proj3 = os.path.join(w, "nestedproj")
+    os.makedirs(proj3)
+    run([CORE, "init", "nestedapp"], cwd=proj3)
+    with open(os.path.join(proj3, "src", "main.cr"), "w") as f:
+        f.write('import coolnet\n\nfunc main() {\n    say coolnet.n()\n}\n')
+    r = run([CORE, "install", net], cwd=proj3)
+    check("install dep that has its own dependencies", r.returncode == 0,
+          r.stdout + r.stderr)
+    r = run([CORE, "build"], cwd=proj3)
+    check("nested dep without source-dir resolves", r.returncode == 0, r.stderr)
+    rr = run(["./nestedapp"], cwd=proj3)
+    check("nested dep modules run", rr.stdout.strip() == "net:base", rr.stdout + rr.stderr)
+
 
 def test_codegen_internals(w):
     src = 'func main() {\n    say 6 * 7\n}\n'

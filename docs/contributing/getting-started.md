@@ -37,7 +37,7 @@ install step needed for development.
 python3 tests/run_tests.py --core build/core
 ```
 
-Expect `97 passed, 0 failed`. See
+Expect `110 passed, 0 failed`. See
 [testing.md](testing.md) for what the suite covers and how to add tests.
 
 ## Try it

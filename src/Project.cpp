@@ -385,6 +385,21 @@ int cmdInit(const std::string &name, DriverOptions &opts) {
 }
 
 // ------------------------------------------------------------------ build ---
+// Push a package's import directories: its checkout root and its source-dir,
+// resolved against the package's own root. The default source-dir "src"
+// applies to packages just as it does to the root project, so a package that
+// ships modules under <checkout>/src needs no manifest entry. Returns true
+// when the package's manifest loaded.
+static bool addPackageImportDirs(DriverOptions &opts, const std::string &checkout,
+                                 Manifest &manifest, Diagnostics &diag) {
+  manifest = Manifest{};
+  opts.packageSrcDirs.push_back(checkout);
+  if (!loadManifest(joinPath(checkout, "core.toml"), manifest, diag)) return false;
+  if (!manifest.sourceDir.empty() && manifest.sourceDir != ".")
+    opts.packageSrcDirs.push_back(joinPath(checkout, manifest.sourceDir));
+  return true;
+}
+
 static bool setupProjectDriver(DriverOptions &opts, Manifest &m, Diagnostics &diag) {
   if (!fileExists(manifestPath())) {
     diag.plainError("no core.toml in this directory - run 'core init' first, "
@@ -414,19 +429,18 @@ static bool setupProjectDriver(DriverOptions &opts, Manifest &m, Diagnostics &di
       spec = dep.repo + "@" + lockedVersion; // constraint still satisfied by pin
     }
     if (!fetchPackage(spec, checkout, version, commit, diag)) return false;
-    opts.packageSrcDirs.push_back(checkout);
-    // the dependency's declared source-dir is on the import path too
-    // (a package with source-dir = "src" exports <checkout>/src/x.cr as x)
-    Manifest dm;
     SourceMgr sm;
-    Diagnostics d(sm);
-    if (loadManifest(joinPath(checkout, "core.toml"), dm, d)) {
-      if (!dm.sourceDir.empty() && dm.sourceDir != ".")
-        opts.packageSrcDirs.push_back(joinPath(checkout, dm.sourceDir));
+    Diagnostics d(sm); // a dependency manifest problem is non-fatal
+    Manifest dm;
+    if (addPackageImportDirs(opts, checkout, dm, d)) {
+      // transitive dependencies get the same import-directory treatment
       for (auto &dd : dm.dependencies) {
         std::string c2, v2, cm2;
         std::string spec2 = dd.repo + (dd.version.empty() ? "" : "@" + dd.version);
-        if (fetchPackage(spec2, c2, v2, cm2, d)) opts.packageSrcDirs.push_back(c2);
+        if (fetchPackage(spec2, c2, v2, cm2, d)) {
+          Manifest nrm;
+          addPackageImportDirs(opts, c2, nrm, d);
+        }
       }
       for (auto &l : dm.link) opts.linkLibs.push_back(l);
       for (auto &lp : dm.linkPaths) opts.libPaths.push_back(lp);
