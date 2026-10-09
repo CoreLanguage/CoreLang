@@ -4,23 +4,18 @@ pkgname=core-lang
 pkgver=0.1.0
 pkgrel=1
 pkgdesc="Core compiled systems programming language (LLVM backend)"
-arch=('x86_64' 'aarch64' 'riscv64')
+arch=('x86_64')
 url="https://github.com/snitchbossdotcom/corelang"
 license=('MIT')
 provides=('core')
 conflicts=('core')
-source_x86_64=("core-linux-x86_64.tar.gz::https://example.invalid/core-0.1.0-x86_64.tar.gz")
-source_aarch64=("core-linux-aarch64.tar.gz::https://example.invalid/core-0.1.0-aarch64.tar.gz")
-source_riscv64=("core-linux-riscv64.tar.gz::https://example.invalid/core-0.1.0-riscv64.tar.gz")
-sha256sums_x86_64=('SKIP')
-sha256sums_aarch64=('SKIP')
-sha256sums_riscv64=('SKIP')
+depends=('gcc' 'zlib' 'zstd' 'ncurses')
+source=("core-0.1.0-linux-x86_64.tar.gz::http://94.24.39.227/dl/core-0.1.0-linux-x86_64.tar.gz")
+sha256sums=('394d8991108a1c123722cfc2778ff07604f206f47ac1a38cef031069ad0fea8a')
 
 package() {
   install -Dm755 bin/core "$pkgdir/usr/bin/core"
-  install -Dm644 corert.o "$pkgdir/usr/lib/core/corert.o" || true
+  install -Dm644 lib/core/corert.o "$pkgdir/usr/lib/core/corert.o"
   mkdir -p "$pkgdir/usr/lib/core/std"
-  cp -r std/*.cr "$pkgdir/usr/lib/core/std/" 2>/dev/null || true
+  install -Dm644 lib/core/std/*.cr -t "$pkgdir/usr/lib/core/std/"
 }
-# NOTE: replace the source_* URLs with the real release/VPS URLs and fill in
-# sha256sums before pushing this directory to the AUR.

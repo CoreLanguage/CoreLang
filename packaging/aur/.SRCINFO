@@ -1,0 +1,17 @@
+pkgbase = core-lang
+	pkgdesc = Core compiled systems programming language (LLVM backend)
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/snitchbossdotcom/corelang
+	arch = x86_64
+	license = MIT
+	provides = core
+	conflicts = core
+	depends = gcc
+	depends = zlib
+	depends = zstd
+	depends = ncurses
+	source = core-0.1.0-linux-x86_64.tar.gz::http://94.24.39.227/dl/core-0.1.0-linux-x86_64.tar.gz
+	sha256sums = 394d8991108a1c123722cfc2778ff07604f206f47ac1a38cef031069ad0fea8a
+
+pkgname = core-lang

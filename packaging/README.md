@@ -1,9 +1,35 @@
 # OS packaging for Core
 
-`apt install core`, `dnf install core`, `apk add core`, `yay -S core`
-all work once the artifacts below are hosted. The `core` binary is
-statically linked (LLVM) so every package just ships `bin/core`,
-`lib/core/{corert.o,std/}` — no LLVM dependency.
+The `core` binary is statically linked (LLVM) so every package just
+ships `bin/core`, `lib/core/{corert.o,std/}` — no LLVM dependency.
+
+## Arch (AUR)
+
+The package name is `core-lang` (`core` is already taken on the AUR).
+The recipe in `packaging/aur/` (`PKGBUILD` + `.SRCINFO`) is tested and
+ready; it downloads the tarball from the VPS, so publishing is a
+one-time, account-bound step the maintainer does:
+
+```sh
+# one time: register on https://aur.archlinux.org and add an AUR ssh key
+git clone ssh://aur@aur.archlinux.org/core-lang.git
+cp packaging/aur/{PKGBUILD,.SRCINFO} core-lang/
+cd core-lang && git add PKGBUILD .SRCINFO && git commit -m "core-lang 0.1.0-1" && git push
+```
+
+After that, any Arch user installs with:
+
+```sh
+yay -S core-lang
+```
+
+Until it is published, Arch users can install without the AUR:
+
+```sh
+makepkg -si   # inside packaging/aur/ (needs the tarball URL reachable)
+# or the tarball installer, which works on Arch (needs curl + tar):
+curl -fsSL https://raw.githubusercontent.com/snitchbossdotcom/corelang/main/install.sh | sudo bash
+```
 
 | Manager | Artifact in this repo | Hosting needed on the VPS |
 |---|---|---|

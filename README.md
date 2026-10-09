@@ -71,9 +71,10 @@ echo "deb [signed-by=/usr/share/keyrings/core.gpg] http://94.24.39.227 stable ma
 sudo apt update && sudo apt install core
 ```
 
-(`yum`/`dnf` share one RPM, plus `apk` and AUR recipes — see
-[packaging/](packaging/). They need their repos configured first;
-bare `apt install core` alone cannot work until the repo is added.)
+(`yum`/`dnf` share one RPM, `apk` uses the `APKBUILD`, Arch uses the AUR
+package `core-lang` — see [packaging/](packaging/). They need their repos
+configured first; bare `apt install core` alone cannot work until the repo
+is added.)
 
 **Tarball installer** (any 64-bit Linux):
 

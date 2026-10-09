@@ -25,8 +25,8 @@ Plain `apt install core` with nothing else only works after the repo
 above is added — Debian has no knowledge of Core until then. Upgrades
 come through the same repo: `sudo apt update && sudo apt upgrade core`.
 Other managers are covered in [packaging/](../../packaging/): one RPM
-for `yum`/`dnf`, an `APKBUILD` for `apk`, a `PKGBUILD` for the AUR
-(`yay`).
+for `yum`/`dnf`, an `APKBUILD` for `apk`, and an AUR package for Arch
+(`yay -S core-lang` once published — see below).
 
 ## Tarball install
 
