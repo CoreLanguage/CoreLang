@@ -1,15 +1,23 @@
-# packages — public Core package submissions
+# packages — public Core package submissions (SEPARATE repo)
 
-This directory is the **template** for the public submissions repo
-(`corelanguage/packages`). I cannot create the GitHub org repo for you;
-create it, then copy this directory in as the repo root:
+This is **not** part of the main Core repo. It seeds a standalone
+submissions repository, `corelanguage/packages`, where authors propose
+packages and maintainers review them. The main compiler repo never
+accepts package submissions directly.
+
+Create it once (needs a GitHub login with org rights):
 
 ```sh
-# you (org owner), once:
-gh repo create corelanguage/packages --public
-cp -r registry-index/* /tmp/packages/ && cd /tmp/packages
-git add . && git commit -m "init package index" && git push -u origin main
+gh repo create corelanguage/packages --public --description \
+  "Public Core package submissions for the corepkg registry"
+cp -r registry-index/* /tmp/packages-seed/ && cd /tmp/packages-seed
+git init -b main && git add . && git commit -m "init package index"
+git remote add origin git@github.com:corelanguage/packages.git
+git push -u origin main
 ```
+
+(Without `gh`: create the empty repo in the GitHub web UI, then run the
+`git init … git push` lines above.)
 
 ## How submissions work
 

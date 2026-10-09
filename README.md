@@ -54,7 +54,28 @@ Hello, Core!
 
 ## Install
 
-64-bit Linux (x86_64, aarch64, riscv64). One line:
+64-bit Linux (x86_64, aarch64, riscv64). Pick one:
+
+**apt (Debian/Ubuntu)** — one command, uses the hosted repository:
+
+```console
+curl -fsSL http://94.24.39.227/setup-apt.sh | sudo bash
+```
+
+or manually:
+
+```console
+curl -fsSL http://94.24.39.227/key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/core.gpg
+echo "deb [signed-by=/usr/share/keyrings/core.gpg] http://94.24.39.227 stable main" \
+  | sudo tee /etc/apt/sources.list.d/core.list
+sudo apt update && sudo apt install core
+```
+
+(`yum`/`dnf` share one RPM, plus `apk` and AUR recipes — see
+[packaging/](packaging/). They need their repos configured first;
+bare `apt install core` alone cannot work until the repo is added.)
+
+**Tarball installer** (any 64-bit Linux):
 
 ```console
 curl -fsSL https://raw.githubusercontent.com/snitchbossdotcom/corelang/main/install.sh | bash

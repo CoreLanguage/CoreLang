@@ -1,9 +1,34 @@
 # Installation
 
-Core runs on 64-bit Linux: x86_64, aarch64, and riscv64. There are two
-ways to get the compiler: a release tarball, or building from source.
+Core runs on 64-bit Linux: x86_64, aarch64, and riscv64. Three ways to
+get the compiler: an apt repository, a release tarball, or building
+from source.
 
-## One-line install
+## apt (Debian/Ubuntu)
+
+One command:
+
+```console
+curl -fsSL http://94.24.39.227/setup-apt.sh | sudo bash
+```
+
+Or step by step:
+
+```console
+curl -fsSL http://94.24.39.227/key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/core.gpg
+echo "deb [signed-by=/usr/share/keyrings/core.gpg] http://94.24.39.227 stable main" \
+  | sudo tee /etc/apt/sources.list.d/core.list
+sudo apt update && sudo apt install core
+```
+
+Plain `apt install core` with nothing else only works after the repo
+above is added — Debian has no knowledge of Core until then. Upgrades
+come through the same repo: `sudo apt update && sudo apt upgrade core`.
+Other managers are covered in [packaging/](../../packaging/): one RPM
+for `yum`/`dnf`, an `APKBUILD` for `apk`, a `PKGBUILD` for the AUR
+(`yay`).
+
+## Tarball install
 
 ```console
 curl -fsSL https://raw.githubusercontent.com/snitchbossdotcom/corelang/main/install.sh | bash
