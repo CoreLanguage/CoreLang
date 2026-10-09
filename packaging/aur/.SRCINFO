@@ -12,6 +12,6 @@ pkgbase = core-lang
 	depends = zstd
 	depends = ncurses
 	source = core-0.1.0-linux-x86_64.tar.gz::http://94.24.39.227/dl/core-0.1.0-linux-x86_64.tar.gz
-	sha256sums = 394d8991108a1c123722cfc2778ff07604f206f47ac1a38cef031069ad0fea8a
+	sha256sums = 97145174e30e6c1d47f7b6497d28c0c6f29d9cf26a6fa91319964d6c0f564425
 
 pkgname = core-lang

@@ -6,6 +6,7 @@
 #
 # The tarball contains:
 #   bin/core          the compiler (static LLVM, stripped)
+#   bin/corepkg       the registry package manager
 #   lib/core/corert.o runtime object
 #   lib/core/std/     standard library sources
 #   LICENSE, README.md
@@ -41,6 +42,7 @@ STAGE="$TMP/stage"
 mkdir -p "$STAGE/bin" "$STAGE/lib/core/std"
 install -m 755 "$TMP/build/core" "$STAGE/bin/core"
 strip "$STAGE/bin/core"
+install -m 755 "${REPO_ROOT}/tools/corepkg/corepkg" "$STAGE/bin/corepkg"
 install -m 644 "$TMP/build/corert.o" "$STAGE/lib/core/corert.o"
 install -m 644 "${REPO_ROOT}"/std/*.cr "$STAGE/lib/core/std/"
 install -m 644 "$REPO_ROOT/LICENSE" "$REPO_ROOT/README.md" "$STAGE/"
