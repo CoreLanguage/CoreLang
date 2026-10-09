@@ -1,0 +1,20 @@
+{
+  "name": "core-lang",
+  "displayName": "Core Language",
+  "version": "0.1.0",
+  "publisher": "corelanguage",
+  "description": "Syntax highlighting + LSP client for the Core language",
+  "engines": { "vscode": "^1.80.0" },
+  "categories": ["Programming Languages"],
+  "contributes": {
+    "languages": [{ "id": "core", "aliases": ["Core"], "extensions": [".cr"] }],
+    "grammars": [{ "language": "core", "scopeName": "source.core", "path": "./syntaxes/core.tmGrammar.json" }],
+    "configuration": {
+      "title": "Core",
+      "properties": {
+        "core-lang.serverPath": { "type": "string", "default": "core-lsp", "description": "Path to tools/lsp/core_lsp.py" },
+        "core-lang.coreBin": { "type": "string", "default": "core", "description": "Path to the core compiler (used for diagnostics)" }
+      }
+    }
+  }
+}

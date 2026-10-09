@@ -1,0 +1,26 @@
+# Maintainer: Core Language <packages@core-lang.example>
+# AUR package `core-lang` — install with: yay -S core-lang
+pkgname=core-lang
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Core compiled systems programming language (LLVM backend)"
+arch=('x86_64' 'aarch64' 'riscv64')
+url="https://github.com/snitchbossdotcom/corelang"
+license=('MIT')
+provides=('core')
+conflicts=('core')
+source_x86_64=("core-linux-x86_64.tar.gz::https://example.invalid/core-0.1.0-x86_64.tar.gz")
+source_aarch64=("core-linux-aarch64.tar.gz::https://example.invalid/core-0.1.0-aarch64.tar.gz")
+source_riscv64=("core-linux-riscv64.tar.gz::https://example.invalid/core-0.1.0-riscv64.tar.gz")
+sha256sums_x86_64=('SKIP')
+sha256sums_aarch64=('SKIP')
+sha256sums_riscv64=('SKIP')
+
+package() {
+  install -Dm755 bin/core "$pkgdir/usr/bin/core"
+  install -Dm644 corert.o "$pkgdir/usr/lib/core/corert.o" || true
+  mkdir -p "$pkgdir/usr/lib/core/std"
+  cp -r std/*.cr "$pkgdir/usr/lib/core/std/" 2>/dev/null || true
+}
+# NOTE: replace the source_* URLs with the real release/VPS URLs and fill in
+# sha256sums before pushing this directory to the AUR.

@@ -1,0 +1,7 @@
+[package]
+name = "coolmath"
+version = "1.0.0"
+description = "tiny math helpers (example submission)"
+source = "https://github.com/example/coolmath"
+tag = "v1.0.0"
+sha256 = "REPLACE_WITH_TARBALL_SHA256"

@@ -1,0 +1,19 @@
+# Alpine APKBUILD for Core. Build with `abuild -r` on Alpine.
+pkgname=core
+pkgver=0.1.0
+pkgrel=0
+pkgdesc="Core compiled systems programming language"
+url="https://github.com/snitchbossdotcom/corelang"
+arch="x86_64 aarch64 riscv64"
+license="MIT"
+options="!strip"
+source="core-linux-$CARCH.tar.gz"
+builddir="$srcdir"
+
+package() {
+  mkdir -p "$pkgdir/usr/bin" "$pkgdir/usr/lib"
+  cp "$builddir/bin/core" "$pkgdir/usr/bin/core"
+  chmod 755 "$pkgdir/usr/bin/core"
+  cp -r "$builddir/lib/core" "$pkgdir/usr/lib/core"
+}
+sha512sums="SKIP"

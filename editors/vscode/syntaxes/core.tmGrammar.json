@@ -1,0 +1,21 @@
+{
+  "name": "Core",
+  "scopeName": "source.core",
+  "fileTypes": ["cr"],
+  "patterns": [
+    { "include": "#comment" },
+    { "include": "#string" },
+    { "include": "#keyword" },
+    { "include": "#type" },
+    { "include": "#number" },
+    { "include": "#function" }
+  ],
+  "repository": {
+    "comment": { "match": "//.*$", "name": "comment.line.double-slash.core" },
+    "string": { "begin": "\"", "end": "\"", "name": "string.quoted.double.core" },
+    "keyword": { "match": "\\b(func|struct|class|interface|trait|enum|import|extern|pub|private|static|mut|const|abstract|virtual|override|tls|if|else|while|for|in|break|continue|return|switch|case|default|match|loop|as|unsafe|true|false|null|self|super|and|or|sizeof|alignof|say)\\b", "name": "keyword.control.core" },
+    "type": { "match": "\\b(void|never|bool|char|string|i8|i16|i32|i64|i128|u8|u16|u32|u64|u128|f32|f64|usize|isize|f32x4|f64x2|i32x4|i64x2|i8x16|i16x8|u8x16|u16x8|u32x4|u64x2)\\b", "name": "support.type.core" },
+    "number": { "match": "\\b\\d[\\d_]*(\\.\\d+)?\\b", "name": "constant.numeric.core" },
+    "function": { "match": "\\b([A-Za-z_]\\w*)\\s*(?=\\()", "name": "entity.name.function.core" }
+  }
+}

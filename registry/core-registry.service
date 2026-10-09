@@ -1,0 +1,16 @@
+[Unit]
+Description=Core package registry
+After=network.target
+
+[Service]
+Type=simple
+User=corepkg
+Environment=REGISTRY_DATA=/var/lib/core-registry
+# Set a real secret with: systemctl edit core-registry
+#   [Service]
+#   Environment=REGISTRY_TOKEN=<secret>
+ExecStart=/usr/bin/python3 /opt/core-registry/server.py 8080
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,266 @@
+#!/usr/bin/env python3
+"""corepkg - install Core packages from your self-hosted registry (no GitHub).
+
+Usage:
+    corepkg install <name>[@constraint]   download + vendor into ./core_packages/<name>
+    corepkg remove <name>
+    corepkg list                          show vendored + locked packages
+    corepkg search <query>                search the registry index
+    corepkg publish <dir>                 pack <dir> and upload (needs COREPKG_TOKEN)
+
+Env:
+    COREPKG_REGISTRY  base URL, default http://127.0.0.1:8080
+    COREPKG_TOKEN     bearer token for `publish`
+    COREPKG_CACHE     default ~/.cache/corepkg
+
+Install flow (offline-from-GitHub by design):
+  1. GET {registry}/api/packages/<name> -> pick best version matching constraint
+  2. GET {registry}/download/<name>/<version>/<version>.tar.gz
+  3. verify sha256 against the index, extract to ./core_packages/<name>
+  4. record `{ path = "./core_packages/<name>" }` + pin in core.lock.json
+
+The existing `core build/run` toolchain consumes path deps in place
+(see docs/packages/publishing.md section 6), so no compiler changes needed.
+"""
+import hashlib
+import json
+import os
+import re
+import shutil
+import sys
+import tarfile
+import tempfile
+import urllib.request
+
+REGISTRY = os.environ.get("COREPKG_REGISTRY", "http://127.0.0.1:8080").rstrip("/")
+CACHE = os.environ.get("COREPKG_CACHE",
+                        os.path.join(os.path.expanduser("~"), ".cache", "corepkg"))
+VENDOR = "core_packages"
+LOCK = "core.lock.json"
+VER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+
+
+def semver(v):
+    m = re.match(r"^(\d+)(?:\.(\d+))?(?:\.(\d+))?$", (v or "").strip())
+    if not m:
+        return None
+    return (int(m.group(1)), int(m.group(2) or 0), int(m.group(3) or 0))
+
+
+def matches(version, constraint):
+    if not constraint:
+        return True
+    v = semver(version)
+    if not v:
+        return False
+    c = constraint.strip()
+    if c.startswith("^"):
+        b = semver(c[1:])
+        if not b:
+            return False
+        if b[0] > 0:
+            return v[0] == b[0] and v >= b
+        if b[1] > 0:
+            return v[:2] == b[:2] and v >= b
+        return v == b
+    if c.startswith(">="):
+        b = semver(c[2:])
+        return bool(b) and v >= b
+    b = semver(c)
+    return bool(b) and v == b
+
+
+def http_json(url, method="GET", payload=None, token=None):
+    data = json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(url, data=data, method=method,
+                                 headers={"Content-Type": "application/json"})
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.load(r)
+
+
+def http_bytes(url):
+    with urllib.request.urlopen(url, timeout=120) as r:
+        return r.read()
+
+
+def load_lock():
+    if os.path.exists(LOCK):
+        with open(LOCK) as f:
+            return json.load(f)
+    return {"packages": {}}
+
+
+def save_lock(lock):
+    with open(LOCK, "w") as f:
+        json.dump(lock, f, indent=2)
+
+
+def record_path_dep(name, relpath):
+    """Add `name = { path = "<relpath>" }` under [dependencies] in core.toml."""
+    manifest = "core.toml"
+    line = f'{name} = {{ path = "{relpath}" }}'
+    if not os.path.exists(manifest):
+        with open(manifest, "w") as f:
+            f.write(f'[package]\nname = "app"\nversion = "0.1.0"\n\n'
+                    f"[dependencies]\n{line}\n")
+        return
+    with open(manifest) as f:
+        text = f.read()
+    if re.search(rf"(?m)^{re.escape(name)}\s*=", text):
+        text = re.sub(rf"(?m)^{re.escape(name)}\s*=.*$", line, text)
+    elif "[dependencies]" in text:
+        text = text.replace("[dependencies]", "[dependencies]\n" + line, 1)
+    else:
+        text += f"\n[dependencies]\n{line}\n"
+    with open(manifest, "w") as f:
+        f.write(text)
+
+
+def cmd_install(spec):
+    name, _, constraint = spec.partition("@")
+    if not re.match(r"^[a-z0-9][a-z0-9_-]{1,63}$", name):
+        sys.exit(f"error: invalid package name '{name}'")
+    meta = http_json(f"{REGISTRY}/api/packages/{name}")
+    cands = [v for v in meta.get("versions", {})
+             if matches(v, constraint)]
+    if not cands:
+        sys.exit(f"error: no version of '{name}' matches '{constraint or 'any'}'")
+    version = sorted(cands, key=semver)[-1]
+    info = meta["versions"][version]
+    dest = os.path.join(VENDOR, name)
+    cached = os.path.join(CACHE, name, f"{version}.tar.gz")
+    os.makedirs(os.path.dirname(cached), exist_ok=True)
+    want = info.get("sha256", "")
+    need_download = True
+    if os.path.exists(cached):
+        with open(cached, "rb") as f:
+            digest = hashlib.sha256(f.read()).hexdigest()
+        if want and digest != want:
+            print(f"cached {name} {version} is stale (sha256 mismatch), re-downloading ...")
+        else:
+            need_download = False
+    if need_download:
+        print(f"downloading {name} {version} from {REGISTRY} ...")
+        raw = http_bytes(f"{REGISTRY}/download/{name}/{version}/{version}.tar.gz")
+        digest = hashlib.sha256(raw).hexdigest()
+        if want and digest != want:
+            sys.exit("error: sha256 mismatch - registry index and file disagree")
+        with open(cached, "wb") as f:
+            f.write(raw)
+    if os.path.isdir(dest):
+        shutil.rmtree(dest)
+    tmpdest = dest + ".tmp"
+    if os.path.isdir(tmpdest):
+        shutil.rmtree(tmpdest)
+    os.makedirs(tmpdest, exist_ok=True)
+    with tarfile.open(cached, "r:gz") as t:
+        # guard against path traversal in tarballs
+        for m in t.getmembers():
+            if m.name.startswith("/") or ".." in m.name.split("/"):
+                sys.exit("error: unsafe tarball entry: " + m.name)
+        try:
+            t.extractall(tmpdest, filter="data")
+        except TypeError:  # Python < 3.12 without filter support
+            t.extractall(tmpdest)
+    # `publish` tars the package dir itself; strip a single top-level dir
+    # so ./core_packages/<name>/*.cr are the importable modules.
+    entries = os.listdir(tmpdest)
+    if len(entries) == 1 and os.path.isdir(os.path.join(tmpdest, entries[0])):
+        os.rename(os.path.join(tmpdest, entries[0]), dest)
+        os.rmdir(tmpdest)
+    else:
+        os.rename(tmpdest, dest)
+    relpath = f"./{VENDOR}/{name}"
+    record_path_dep(name, relpath)
+    lock = load_lock()
+    lock["packages"][name] = {"version": version, "sha256": digest,
+                              "registry": REGISTRY, "path": relpath}
+    save_lock(lock)
+    print(f"installed {name} {version} -> {relpath} (sha256 {digest[:12]})")
+
+
+def cmd_remove(name):
+    dest = os.path.join(VENDOR, name)
+    if os.path.isdir(dest):
+        shutil.rmtree(dest)
+    manifest = "core.toml"
+    if os.path.exists(manifest):
+        with open(manifest) as f:
+            lines = f.readlines()
+        with open(manifest, "w") as f:
+            f.writelines(l for l in lines
+                         if not re.match(rf"^{re.escape(name)}\s*=", l))
+    lock = load_lock()
+    lock["packages"].pop(name, None)
+    save_lock(lock)
+    print(f"removed {name}")
+
+
+def cmd_list():
+    lock = load_lock()
+    pkgs = lock.get("packages", {})
+    if not pkgs:
+        print("(no corepkg packages; see ./core_packages/ and core.lock.json)")
+        return
+    for n, m in sorted(pkgs.items()):
+        print(f"{n} {m.get('version')}  {m.get('path')}  sha256:{m.get('sha256','')[:12]}")
+
+
+def cmd_search(query):
+    idx = http_json(f"{REGISTRY}/api/packages")
+    for p in idx.get("packages", []):
+        if query.lower() in (p["name"] + p.get("description", "")).lower():
+            print(f"{p['name']} {p['version']} - {p.get('description','')}")
+
+
+def cmd_publish(directory, description=""):
+    import base64
+    import subprocess
+    directory = directory.rstrip("/")
+    name = os.path.basename(os.path.abspath(directory))
+    m = re.search(r'(?m)^version\s*=\s*"([^"]+)"',
+                  open(os.path.join(directory, "core.toml")).read())
+    version = m.group(1) if m else None
+    if not version or not VER_RE.match(version):
+        sys.exit("error: need X.Y.Z version (core.toml [package] version)")
+    tmp = tempfile.mktemp(suffix=".tar.gz")
+    subprocess.check_call(["tar", "-czf", tmp, "-C", os.path.dirname(directory)
+                           or ".", name])
+    with open(tmp, "rb") as f:
+        blob = base64.b64encode(f.read()).decode()
+    token = os.environ.get("COREPKG_TOKEN", "")
+    res = http_json(f"{REGISTRY}/api/publish", "POST",
+                    {"name": name, "version": version,
+                     "description": description, "tarball_b64": blob},
+                    token=token or None)
+    print(f"published {name} {version}: {res}")
+
+
+def main(argv):
+    if len(argv) < 2 or argv[1] in ("-h", "--help", "help"):
+        print(__doc__)
+        return 0
+    cmd, args = argv[1], argv[2:]
+    try:
+        if cmd == "install" and len(args) == 1:
+            cmd_install(args[0])
+        elif cmd == "remove" and len(args) == 1:
+            cmd_remove(args[0])
+        elif cmd == "list":
+            cmd_list()
+        elif cmd == "search" and len(args) == 1:
+            cmd_search(args[0])
+        elif cmd == "publish" and 1 <= len(args) <= 2:
+            cmd_publish(args[0], *args[1:])
+        else:
+            print(__doc__)
+            return 2
+    except Exception as e:
+        sys.exit(f"error: {e}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
