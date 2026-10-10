@@ -119,7 +119,7 @@ int main(int argc, char **argv) {
   dopts.runtimeObj = findCompilerData("corert.o", dopts);
 
   if (cmd == "version" || cmd == "--version") {
-    printf("Core compiler 0.1.0 (LLVM %s backend)\n", LLVM_VERSION_STRING);
+    printf("Core compiler 0.1.1 (LLVM %s backend)\n", LLVM_VERSION_STRING);
     return 0;
   }
   if (cmd == "compile") {

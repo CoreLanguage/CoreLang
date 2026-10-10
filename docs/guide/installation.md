@@ -74,7 +74,7 @@ Verify the install:
 
 ```console
 $ core version
-Core compiler 0.1.0 (LLVM 18.1.x backend)
+Core compiler 0.1.1 (LLVM 18.1.x backend)
 ```
 
 Then write your first program (see [getting-started.md](getting-started.md)

@@ -15,7 +15,7 @@ Verify the compiler identifies itself:
 
 ```sh
 ./build/core version
-# Core compiler 0.1.0 (LLVM 18.x backend)
+# Core compiler 0.1.1 (LLVM 18.x backend)
 ```
 
 Note the LLVM patch version in the output — releases pin and document it
@@ -108,7 +108,7 @@ CORE_HOME=/tmp/core-install/lib/core /tmp/core-install/bin/core check src/main.c
 ## 9. Version and docs
 
 - `src/Main.cpp` prints the version string
-  (`"Core compiler 0.1.0 (LLVM %s backend)"`) — bump it deliberately.
+  (`"Core compiler 0.1.1 (LLVM %s backend)"`) — bump it deliberately.
 - `docs/LANGUAGE-REFERENCE-SUMMARY.md` is the ground truth for what the
   language does; update it (including the "Known limitations" section) in
   the release commit.

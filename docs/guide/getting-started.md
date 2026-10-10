@@ -16,7 +16,7 @@ build-from-source route. Check that it worked:
 
 ```console
 $ core version
-Core compiler 0.1.0 (LLVM 18.1.x backend)
+Core compiler 0.1.1 (LLVM 18.1.x backend)
 ```
 
 ## Your first program

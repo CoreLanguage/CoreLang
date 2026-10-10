@@ -88,7 +88,7 @@ standard library in `lib/core`). Then:
 
 ```console
 $ core version
-Core compiler 0.1.0 (LLVM 18.1.3 backend)
+Core compiler 0.1.1 (LLVM 18.1.3 backend)
 $ core init hello && cd hello && core run
 Hello, Core!
 ```
